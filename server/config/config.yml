@@ -1,0 +1,11 @@
+
+# 此文件存放服务器的配置信息，包含数据库连接信息、日志配置等。
+app:
+  name: GiftMemo
+  port: :8080
+
+database:
+  dsn: "root:root@tcp(127.0.0.1:3307)/giftmemo?charset=utf8mb4&parseTime=True&loc=Local"
+  max_idle_conns: 10
+  max_open_conns: 100
+ 
