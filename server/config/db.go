@@ -2,6 +2,7 @@ package config
 
 import (
 	"giftmemo/global"
+	"giftmemo/models"
 	"log"
 	"time"
 
@@ -29,4 +30,10 @@ func initDB() {
 	}
 	// 将 db 赋值给全局变量，供其他包使用
 	global.DB = db
+	// 自动迁移数据库表结构
+	var req models.User
+	if err := global.DB.AutoMigrate(&req); err != nil {
+
+		log.Fatalf("自动迁移数据库失败: %v", err)
+	}
 }
