@@ -5,7 +5,7 @@ app:
   port: :8080
 
 database:
-  dsn: "root:root@tcp(127.0.0.1:3307)/giftmemo?charset=utf8mb4&parseTime=True&loc=Local"
+ 
   max_idle_conns: 10
   max_open_conns: 100
  

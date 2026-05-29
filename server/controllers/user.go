@@ -22,7 +22,7 @@ func CreateUser(c *gin.Context) {
 	//检查用户名是否已存在
 	var euser models.User
 	if result := global.DB.Where("username = ?", req.Username).First(&euser); result.Error == nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "用户名已存在"})
+		c.JSON(http.StatusConflict, gin.H{"error": "用户名已存在"})
 		return
 	}
 	//hash密码
@@ -44,5 +44,5 @@ func CreateUser(c *gin.Context) {
 		return
 	}
 	//返回成功响应
-	c.JSON(http.StatusOK, gin.H{"message": "用户创建成功", "username": user.Username})
+	c.JSON(http.StatusCreated, gin.H{"message": "用户创建成功", "username": user.Username})
 }

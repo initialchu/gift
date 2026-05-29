@@ -7,6 +7,7 @@ type User struct {
 	gorm.Model
 	Username string `gorm:"unique;not null" json:"username" binding:"required"`
 	Password string `gorm:"not null" json:"-" binding:"required"`
+	Role     string `gorm:"type:varchar(16);default:user;not null" json:"role"`
 }
 
 // 登录请求结构体

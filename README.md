@@ -21,6 +21,8 @@
 | 数据库 | MySQL |
 | ORM | GORM |
 | 配置管理 | Viper |
+| 鉴权 | JWT（golang-jwt/jwt/v5） |
+| 密码加密 | bcrypt |
 | 前端 | 待定 |
 
 ## 项目结构
@@ -28,18 +30,43 @@
 ```
 gift/
 ├── server/
-│   ├── main.go              # 应用入口
-│   ├── go.mod               # Go 模块定义
+│   ├── main.go                  # 应用入口
+│   ├── go.mod                   # Go 模块定义
 │   ├── config/
-│   │   ├── config.go        # 配置加载
-│   │   ├── config.yml       # 配置文件
-│   │   └── db.go            # 数据库初始化
-│   ├── models/              # 数据模型
-│   ├── controllers/          # 控制器
-│   ├── router/              # 路由定义
-│   └── global/              # 全局变量
+│   │   ├── config.go            # 配置加载（Viper）
+│   │   ├── config.yml           # 配置文件
+│   │   └── db.go                # 数据库初始化（GORM）
+│   ├── models/
+│   │   └── user.go              # User 模型 + LoginRequest DTO
+│   ├── controllers/
+│   │   ├── auth.go              # 登录
+│   │   └── user.go              # 用户管理
+│   ├── middlewares/
+│   │   └── auth.go              # JWT 鉴权 + 管理员中间件
+│   ├── router/
+│   │   └── router.go            # 路由定义
+│   ├── utils/
+│   │   └── utils.go             # bcrypt 密码工具 + JWT 工具
+│   └── global/
+│       └── global.go            # 全局变量（DB 实例）
+├── obsidian/
+│   └── step.md                  # 开发笔记
 └── README.md
 ```
+
+## API 接口
+
+### 公开接口
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| POST | `/api/auth/login` | 用户登录，返回 JWT token |
+
+### 管理员接口（需 JWT + Admin 权限）
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| POST | `/api/admin/users` | 创建用户 |
 
 ## 快速开始
 

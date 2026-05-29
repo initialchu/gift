@@ -239,3 +239,221 @@ func initDB() {
 # 6. 人情卡片模块
 
 （待实现）
+
+---
+
+# 7. 开发进度
+
+## 2026-05-28（已完成）
+
+| 模块 | 内容 | 文件 |
+|------|------|------|
+| 配置系统 | Viper 加载 yml 配置 | `config/config.go` |
+| 数据库 | GORM 连接 MySQL + 连接池 + AutoMigrate | `config/db.go` |
+| 全局变量 | 导出 DB 实例 | `global/global.go` |
+| User 模型 | 字段：Username, Password, Role（默认 user） | `models/user.go` |
+| LoginRequest DTO | 接收登录请求的独立结构体 | `models/user.go` |
+| 密码工具 | bcrypt 加密 + 验证 | `utils/utils.go` |
+| JWT 工具 | 生成 token（HS256, 24h） + 解析验证 | `utils/utils.go` |
+| 登录接口 | 绑定 → 查库 → 验密 → 返回 JWT | `controllers/auth.go` |
+| 创建用户接口 | 绑定 → 查重 → 哈希 → 入库 | `controllers/user.go` |
+| JWT 中间件 | 解析 token，提取 username 和 role 到 Context | `middlewares/auth.go` |
+
+## 2026-05-29（今日进度）
+
+### 已修复
+
+| # | 文件 | 修改内容 |
+|---|------|----------|
+| 1 | `middlewares/auth.go` | 添加 `c.Next()`，`AuthMiddleware` 解析 JWT 后放行请求 |
+| 2 | `middlewares/auth.go` | 新增 `AdminMiddleware`（RequireAdmin），检查 role 是否为 admin，否则返回 403 |
+| 3 | `utils/utils.go` | `GenerateJWT` 增加 role 参数写入 claims；`ParseJWT` 返回 `(username, role, error)` |
+| 4 | `controllers/auth.go` | `Login` 调用 `GenerateJWT` 时传入 `user.Role` |
+| 6 | `router/router.go` | `CreateUser` 移到 `/api/admin/create`，挂 `AuthMiddleware` + `AdminMiddleware` |
+| 7 | `main.go` | `fmt.Println` 移到 `r.Run` 之前 |
+
+### 待修复
+
+| # | 文件 | 问题 |
+|---|------|------|
+| 5 | `controllers/user.go` | 创建成功应返回 `201`，用户名已存在应返回 `409` |
+| - | `router/router.go:20` | `api.GET("/profile")` 缺少 handler |
+
+---
+
+# 8. 创建管理员账户
+
+创建管理员有三种方式，推荐使用种子数据（方式 2）。
+
+## 方式 1：手动操作数据库
+
+在 MySQL 客户端中直接 INSERT：
+
+```sql
+INSERT INTO users (username, password, role, created_at, updated_at)
+VALUES ('admin', '<bcrypt哈希>', 'admin', NOW(), NOW());
+```
+
+需要先生成 bcrypt 哈希，不推荐。
+
+## 方式 2：种子数据（Seeding）——推荐 ✅
+
+在 `main.go` 启动时检查是否存在管理员，没有则自动创建：
+
+```go
+func seedAdmin() {
+    var count int64
+    global.DB.Model(&models.User{}).Where("role = ?", "admin").Count(&count)
+    if count == 0 {
+        hashedPwd, _ := utils.HashPassword("admin123")
+        global.DB.Create(&models.User{
+            Username: "admin",
+            Password: hashedPwd,
+            Role:     "admin",
+        })
+        fmt.Println("已创建默认管理员账号")
+    }
+}
+```
+
+在 `main.go` 中 `config.InitConfig()` 之后、`r.Run()` 之前调用。
+
+**优点**：项目启动即有管理员；清库重建时自动生成；不依赖外部工具。
+
+## 方式 3：改造 CreateUser 接口支持传 role
+
+新增 `CreateUserRequest` DTO，增加 role 字段。管理员接口已受 `AdminMiddleware` 保护，只有管理员能创建用户并指定角色。属于后续功能增强。
+
+---
+
+# 9. 敏感信息管理
+
+## 核心原则：敏感信息分层
+
+```
+config.yml          → 提交到 git，存模板/默认值（不含密码）
+config.local.yml    → 不提交（.gitignore 已忽略 *.local.yml），存真实密码
+```
+
+Viper 的 `MergeInConfig` 支持合并多个配置文件，后读的覆盖先读的。
+
+## 信息分类
+
+| 信息 | 放哪里 | 原因 |
+|------|--------|------|
+| 应用名、端口 | `config.yml` | 不敏感 |
+| 数据库连接池配置 | `config.yml` | 不敏感 |
+| 数据库 DSN（含密码） | `config.local.yml` | 🔒 含密码 |
+| JWT 密钥 | `config.local.yml` | 🔒 密钥泄露 = 任意伪造 token |
+| 管理员初始密码 | `config.local.yml` | 🔒 初始凭据 |
+| JWT 过期时间 | `config.yml` | 不敏感 |
+
+## 实现步骤
+
+### 1. 修改 `config.go`，让 Viper 读取 `config.local.yml`
+
+```go
+func InitConfig() {
+    viper.SetConfigName("config")
+    viper.SetConfigType("yml")
+    viper.AddConfigPath("./config")
+    if err := viper.ReadInConfig(); err != nil {
+        log.Fatalf("读取配置文件失败: %v", err)
+    }
+
+    // 合并本地配置（可选，不存在也不报错）
+    viper.SetConfigName("config.local")
+    if err := viper.MergeInConfig(); err != nil {
+        if _, ok := err.(viper.ConfigFileNotFoundError); !ok {
+            log.Printf("警告: 加载 config.local.yml 失败: %v", err)
+        }
+    }
+
+    AppConfig = &Config{}
+    if err := viper.Unmarshal(AppConfig); err != nil {
+        log.Fatalf("映射配置文件失败: %v", err)
+    }
+    initDB()
+}
+```
+
+`MergeInConfig` 是叠加合并，`config.local.yml` 里的值覆盖 `config.yml` 同名字段。
+
+### 2. 瘦身 `config.yml`，新建 `config.local.yml`
+
+**config.yml**（提交到 git，只有模板）：
+
+```yaml
+app:
+  name: GiftMemo
+  port: :8080
+
+database:
+  dsn: "请复制到 config.local.yml 修改"
+  max_idle_conns: 10
+  max_open_conns: 100
+```
+
+**config.local.yml**（不提交，被 .gitignore 保护）：
+
+```yaml
+database:
+  dsn: "root:真实密码@tcp(127.0.0.1:3307)/giftmemo?charset=utf8mb4&parseTime=True&loc=Local"
+
+admin:
+  default_username: admin
+  default_password: 你的管理员密码
+
+jwt:
+  secret: 你的随机密钥字符串
+```
+
+### 3. JWT 密钥从配置读取
+
+`utils/utils.go` 中当前 `"wushijiazu"` 是硬编码的，应改为从 Viper 读取：
+
+```go
+secret := viper.GetString("jwt.secret")
+```
+
+### 4. 种子管理员从配置读取凭据
+
+```go
+username := viper.GetString("admin.default_username")
+password := viper.GetString("admin.default_password")
+```
+
+## 额外安全建议
+
+- `.gitignore` 已配置 `*.local.yml` 和 `.env`，确保不会被提交 ✅
+- 团队协作：提供 `config.local.yml.example`（模板，不含真实密码），每人自行改名填写
+- 生产环境：密码应走环境变量（Docker `--env`、K8s Secret），学习项目用 `.local.yml` 足够
+- `config.yml` 中的 `dsn` 当前也含有明文密码 `root:root`，同样应迁移到 `config.local.yml`
+
+---
+
+# 10. Gin 中间件顺序
+
+中间件的执行顺序是「先 Use 先执行」：
+
+```go
+// ✅ 正确顺序
+admin.Use(middlewares.AuthMiddleware())    // ① 先认证 → c.Set("username") c.Set("role")
+admin.Use(middlewares.AdminMiddleware())   // ② 后鉴权 → c.Get("role") 判断权限
+
+// ❌ 错误顺序
+admin.Use(middlewares.AdminMiddleware())   // 此时角色还没注入，永远返回 403
+admin.Use(middlewares.AuthMiddleware())
+```
+
+**本质**：认证（Authentication，确认你是谁）必须在授权（Authorization，判断你能做什么）之前。
+
+---
+
+### 下一步
+
+1. 修复 user.go 状态码（400→409, 200→201）
+2. 实现敏感信息分层（config.local.yml）
+3. 实现种子管理员脚本（seedAdmin）
+4. 启动项目验证登录和创建用户接口
+5. 开始礼薄模块的数据模型设计

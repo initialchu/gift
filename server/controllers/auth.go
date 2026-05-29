@@ -33,7 +33,7 @@ func Login(c *gin.Context) {
 	}
 
 	//调用JWT生成函数
-	token, err := utils.GenerateJWT(user.Username)
+	token, err := utils.GenerateJWT(user.Username, user.Role)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error": err.Error(),
