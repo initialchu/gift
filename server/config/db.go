@@ -32,11 +32,7 @@ func initDB() {
 	// 将 db 赋值给全局变量，供其他包使用
 	global.DB = db
 	// 自动迁移数据库表结构
-	var req models.User
-	if err := global.DB.AutoMigrate(&req); err != nil {
-
-		log.Fatalf("自动迁移数据库失败: %v", err)
-	}
+	Autotable()
 }
 
 // 暴露一个函数创建管理员
@@ -59,4 +55,21 @@ func CreateAdmin() {
 		log.Printf("管理员账号已创建，用户名: %s", AppConfig.Admin.Name)
 	}
 
+}
+
+func Autotable() {
+	var req models.User
+	if err := global.DB.AutoMigrate(&req); err != nil {
+
+		log.Fatalf("自动迁移数据库失败: %v", err)
+	}
+	var giftbooks models.GiftBook
+	if err := global.DB.AutoMigrate(&giftbooks); err != nil {
+		log.Fatalf("自动迁移数据库失败: %v", err)
+
+	}
+	var giftrecords models.GiftRecord
+	if err := global.DB.AutoMigrate(&giftrecords); err != nil {
+		log.Fatalf("自动迁移数据库失败: %v", err)
+	}
 }

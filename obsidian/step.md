@@ -232,7 +232,77 @@ func initDB() {
 
 # 5. 礼薄模块
 
-（待实现）
+## 5.1 核心概念
+
+```
+一个礼薄 = 一个事件（如"张三婚礼"）
+    ├── 往来记录1：李四，500元，北京市，附带茶叶一盒
+    ├── 往来记录2：王五，300元，上海市
+    └── 往来记录3：赵六，200元
+
+人情卡片 = 按"人名"跨所有礼薄汇总
+    └── 李四：往 500 + 来 800 → 净额 +300（点击看详情）
+```
+
+## 5.2 业务规则
+
+| 规则 | 说明 |
+|------|------|
+| 一个礼薄方向统一 | 一本礼薄里全是"来"或全是"往"（默认"来"） |
+| 地址和附赠品 | 可选填写 |
+| 权限 | 礼薄和记录的增删改全部由管理员操作，普通用户只能查看 |
+| 关联 | 一本礼薄（GiftBook）下有多条记录（GiftRecord），`GiftBookID` 外键关联 |
+
+## 5.3 数据模型（`models/gift.go`）
+
+```go
+// GiftBook 礼薄
+type GiftBook struct {
+    gorm.Model
+    EventName string       `gorm:"not null" json:"event_name"`
+    EventDate time.Time    `json:"event_date"`
+    Direction string       `gorm:"type:varchar(4);default:来;not null" json:"direction"`
+    CreatedBy string       `gorm:"not null" json:"created_by"`
+    Records   []GiftRecord `gorm:"foreignKey:GiftBookID" json:"records,omitempty"`
+}
+
+// GiftRecord 礼薄中的单条往来记录
+type GiftRecord struct {
+    gorm.Model
+    GiftBookID uint    `gorm:"not null;index" json:"gift_book_id"`
+    PersonName string  `gorm:"type:varchar(64);not null" json:"person_name"`
+    Amount     float64 `gorm:"type:decimal(10,2);not null" json:"amount"`
+    Address    string  `gorm:"type:varchar(255)" json:"address,omitempty"`
+    GiftNote   string  `gorm:"type:varchar(255)" json:"gift_note,omitempty"`
+}
+```
+
+关系：`GiftBook` 1:N `GiftRecord`（通过 `GiftBookID` 外键）。
+
+## 5.4 API 设计
+
+| 方法 | 路径 | 权限 | 说明 |
+|------|------|------|------|
+| `GET` | `/api/gift-books` | 登录用户 | 礼薄列表 |
+| `GET` | `/api/gift-books/:id` | 登录用户 | 礼薄详情（含所有记录） |
+| `POST` | `/api/admin/gift-books` | 管理员 | 创建礼薄 |
+| `PUT` | `/api/admin/gift-books/:id` | 管理员 | 修改礼薄 |
+| `DELETE` | `/api/admin/gift-books/:id` | 管理员 | 删除礼薄（级联删除记录） |
+| `POST` | `/api/admin/gift-books/:id/records` | 管理员 | 添加记录 |
+| `PUT` | `/api/admin/gift-books/:id/records/:rid` | 管理员 | 修改记录 |
+| `DELETE` | `/api/admin/gift-books/:id/records/:rid` | 管理员 | 删除记录 |
+
+- 列表只返回礼薄信息 + 记录数（不查详情，性能更好）
+- 详情才返回所有记录
+
+## 5.5 需要修改的文件
+
+| 文件 | 动作 | 内容 |
+|------|------|------|
+| `models/gift.go` | 新建 | GiftBook + GiftRecord 模型 |
+| `controllers/gift.go` | 新建 | 8 个 CRUD 处理函数 |
+| `router/router.go` | 修改 | 挂接礼薄路由 |
+| `config/db.go` | 修改 | `AutoMigrate` 追加两个模型 |
 
 ---
 
@@ -269,15 +339,14 @@ func initDB() {
 | 2 | `middlewares/auth.go` | 新增 `AdminMiddleware`（RequireAdmin），检查 role 是否为 admin，否则返回 403 |
 | 3 | `utils/utils.go` | `GenerateJWT` 增加 role 参数写入 claims；`ParseJWT` 返回 `(username, role, error)` |
 | 4 | `controllers/auth.go` | `Login` 调用 `GenerateJWT` 时传入 `user.Role` |
+| 5 | `config/config.go` | 扩展 `Config` 结构体（Admin、Jwt 字段）；增加 `MergeInConfig` 加载 `config.local.yml`；注入 JWT 配置到 utils |
 | 6 | `router/router.go` | `CreateUser` 移到 `/api/admin/create`，挂 `AuthMiddleware` + `AdminMiddleware` |
-| 7 | `main.go` | `fmt.Println` 移到 `r.Run` 之前 |
+| 7 | `main.go` | `fmt.Println` 移到 `r.Run` 之前；调用 `CreateAdmin()` 种子管理 |
+| 8 | `config/db.go` | 实现 `CreateAdmin()`，从配置读取凭据自动创建管理员 |
+| 9 | `utils/utils.go` | 消除 JWT 硬编码，改为 `SetJWTConfig` 注入 |
+| 10 | `controllers/user.go` | 创建成功 `200→201`，用户名已存在 `400→409` |
 
-### 待修复
-
-| # | 文件 | 问题 |
-|---|------|------|
-| 5 | `controllers/user.go` | 创建成功应返回 `201`，用户名已存在应返回 `409` |
-| - | `router/router.go:20` | `api.GET("/profile")` 缺少 handler |
+全部 7 项待修复 + 敏感信息管理 + 种子管理员均已完成 ✅
 
 ---
 
@@ -452,8 +521,8 @@ admin.Use(middlewares.AuthMiddleware())
 
 ### 下一步
 
-1. 修复 user.go 状态码（400→409, 200→201）
-2. 实现敏感信息分层（config.local.yml）
-3. 实现种子管理员脚本（seedAdmin）
-4. 启动项目验证登录和创建用户接口
-5. 开始礼薄模块的数据模型设计
+1. 创建 `models/gift.go` — GiftBook + GiftRecord 模型
+2. 创建 `controllers/gift.go` — 8 个 CRUD 处理函数
+3. 修改 `config/db.go` — AutoMigrate 追加两个新模型
+4. 修改 `router/router.go` — 挂接礼薄路由（公开 + admin）
+5. 启动验证礼薄创建、添加记录、查看等接口
