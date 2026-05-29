@@ -331,22 +331,42 @@ type GiftRecord struct {
 
 ## 2026-05-29（今日进度）
 
-### 已修复
+### 上午：JWT 鉴权链路修复 ✅
 
 | # | 文件 | 修改内容 |
 |---|------|----------|
-| 1 | `middlewares/auth.go` | 添加 `c.Next()`，`AuthMiddleware` 解析 JWT 后放行请求 |
-| 2 | `middlewares/auth.go` | 新增 `AdminMiddleware`（RequireAdmin），检查 role 是否为 admin，否则返回 403 |
-| 3 | `utils/utils.go` | `GenerateJWT` 增加 role 参数写入 claims；`ParseJWT` 返回 `(username, role, error)` |
+| 1 | `middlewares/auth.go` | 添加 `c.Next()` |
+| 2 | `middlewares/auth.go` | 新增 `AdminMiddleware`，检查 role 是否为 admin |
+| 3 | `utils/utils.go` | `GenerateJWT` 增加 role 参数；`ParseJWT` 返回 `(username, role, error)` |
 | 4 | `controllers/auth.go` | `Login` 调用 `GenerateJWT` 时传入 `user.Role` |
-| 5 | `config/config.go` | 扩展 `Config` 结构体（Admin、Jwt 字段）；增加 `MergeInConfig` 加载 `config.local.yml`；注入 JWT 配置到 utils |
-| 6 | `router/router.go` | `CreateUser` 移到 `/api/admin/create`，挂 `AuthMiddleware` + `AdminMiddleware` |
-| 7 | `main.go` | `fmt.Println` 移到 `r.Run` 之前；调用 `CreateAdmin()` 种子管理 |
-| 8 | `config/db.go` | 实现 `CreateAdmin()`，从配置读取凭据自动创建管理员 |
+| 5 | `config/config.go` | 扩展 Config 结构体；`MergeInConfig` 加载 config.local.yml；注入 JWT 配置 |
+| 6 | `router/router.go` | `CreateUser` 移到 `/api/admin/create`，挂认证+授权中间件 |
+| 7 | `main.go` | `fmt.Println` 移到 `r.Run` 之前；调用 `CreateAdmin()` |
+| 8 | `config/db.go` | 实现 `CreateAdmin()` 种子管理员；`AutoMigrate` 提取为 `Autotable()` |
 | 9 | `utils/utils.go` | 消除 JWT 硬编码，改为 `SetJWTConfig` 注入 |
 | 10 | `controllers/user.go` | 创建成功 `200→201`，用户名已存在 `400→409` |
 
-全部 7 项待修复 + 敏感信息管理 + 种子管理员均已完成 ✅
+### 下午：礼薄模块开发
+
+| # | 文件 | 内容 |
+|---|------|------|
+| 1 | `models/gift.go` | 创建 GiftBook + GiftRecord 模型 |
+| 2 | `controllers/giftbook.go` | CreateGiftBook、GetgiftBooks、GetgiftBookbyID、DeleteGiftBook、UpdateGiftBook |
+| 3 | `controllers/giftrecord.go` | AddGift（创建礼金记录，含礼薄存在性校验） |
+| 4 | `config/db.go` | `Autotable()` 追加 GiftBook、GiftRecord |
+| 5 | `README.md` | 更新项目结构、API 文档、配置说明 |
+| 6 | Git commit | `e6ba367 feat: 完成礼薄模块基础 CRUD` |
+
+### 礼薄控制器已实现函数
+
+| 函数 | 文件 | 关键逻辑 |
+|------|------|----------|
+| `CreateGiftBook` | giftbook.go | 同名检测 + 自动填充创建者 |
+| `GetgiftBooks` | giftbook.go | 查询全部礼薄 |
+| `GetgiftBookbyID` | giftbook.go | Preload Records 返回详情 |
+| `DeleteGiftBook` | giftbook.go | 先删记录再删礼薄（级联） |
+| `UpdateGiftBook` | giftbook.go | 用 map 限定允许字段防越权 |
+| `AddGift` | giftrecord.go | 校验礼薄存在后才创建记录 |
 
 ---
 
@@ -519,10 +539,17 @@ admin.Use(middlewares.AuthMiddleware())
 
 ---
 
+### 待完成
+
+| # | 文件 | 内容 |
+|---|------|------|
+| 1 | `controllers/giftrecord.go` | 修改礼金记录函数 |
+| 2 | `controllers/giftrecord.go` | 删除礼金记录函数 |
+| 3 | `router/router.go` | 挂接礼薄和记录的全部路由 |
+
 ### 下一步
 
-1. 创建 `models/gift.go` — GiftBook + GiftRecord 模型
-2. 创建 `controllers/gift.go` — 8 个 CRUD 处理函数
-3. 修改 `config/db.go` — AutoMigrate 追加两个新模型
-4. 修改 `router/router.go` — 挂接礼薄路由（公开 + admin）
-5. 启动验证礼薄创建、添加记录、查看等接口
+1. 完成剩余礼金记录 CRUD（修改、删除）
+2. 修改 `router/router.go` 挂接所有礼薄/记录路由
+3. 启动项目测试完整的礼薄增删改查流程
+4. 开始人情卡片模块设计
