@@ -23,7 +23,11 @@
 | 配置管理 | Viper |
 | 鉴权 | JWT（golang-jwt/jwt/v5） |
 | 密码加密 | bcrypt |
-| 前端 | Vue 3 + Vite + TypeScript |
+| 前端框架 | Vue 3 + Vite + TypeScript |
+| UI 组件库 | Element Plus |
+| HTTP 客户端 | Axios |
+| 代码格式化 | Prettier |
+| 状态管理 | Pinia + localStorage（持久化） |
 
 ## 项目结构
 
@@ -53,14 +57,23 @@ gift/
 │   │   └── utils.go             # bcrypt 密码工具 + JWT 生成/解析
 │   └── global/
 │       └── global.go            # 全局变量（DB 实例）
-├── client/                      # 前端（Vue 3 + Vite + TypeScript）
+├── client/                      # 前端（Vue 3 + Vite + TypeScript + Element Plus）
 │   ├── src/
-│   │   ├── App.vue
-│   │   ├── main.ts
+│   │   ├── App.vue              # 根组件（el-menu 导航栏）
+│   │   ├── main.ts              # 应用入口（注册 Element Plus、Pinia、Router）
+│   │   ├── axios.ts             # Axios 实例（请求拦截器自动加 token + 响应拦截器处理 401）
 │   │   ├── router/
-│   │   │   └── index.ts
-│   │   └── stores/
-│   │       └── counter.ts
+│   │   │   └── index.ts         # 路由定义（/login、/home、/card、/giftbooks）
+│   │   ├── stores/
+│   │   │   └── auth.ts          # 登录态 Pinia store
+│   │   ├── components/
+│   │   │   └── Login.vue        # 登录组件
+│   │   └── views/
+│   │       ├── Home.vue         # 首页
+│   │       ├── Card.vue         # 人情卡片
+│   │       └── GiftBooks.vue    # 礼薄列表
+│   ├── .prettierrc              # Prettier 格式化规则
+│   ├── .prettierignore          # Prettier 忽略目录
 │   ├── index.html
 │   └── vite.config.ts
 ├── obsidian/
@@ -136,6 +149,12 @@ npm run dev
 ```
 
 后端端口通过 `config.yml` 中 `app.port` 配置（默认 `:8080`）。服务支持优雅关闭（Ctrl+C 后等待最多 5 秒处理完现有请求）。
+
+### 前端开发说明
+
+- API 客户端 `axios.ts` 已配置请求拦截器（自动从 localStorage 注入 JWT token）+ 响应拦截器（401 自动清除 token 并跳转登录页）
+- VSCode 配置了 `"editor.formatOnSave": true`，保存时 Prettier 自动格式化
+- 登录组件（`components/Login.vue`）和路由表（`router/index.ts`）正在开发中
 
 ## 许可证
 

@@ -693,3 +693,715 @@ admin 组（JWT + AdminMiddleware）：
 1. 公开路由挂接：`api` 组加 `GET /gift-books` 和 `GET /gift-books/:id`（普通用户查看）
 2. 启动项目测试完整的礼薄 + 记录 CRUD 流程
 3. 开始人情卡片模块设计
+
+---
+
+# 11. 前端开发计划
+
+## 11.1 当前前端状态
+
+前端使用 Vue 3 + Vite + TypeScript 脚手架搭建，当前状态：
+
+- ✅ `main.ts` — 正确挂载 Vue、Pinia、Router
+- ✅ `vite.config.ts` — Vue 插件 + `@` 别名已配置
+- ✅ `package.json` — 依赖齐全（Vue 3.5、Router 5、Pinia 3）
+- 🟡 `router/index.ts` — routes 数组为空，无任何页面路由
+- 🟡 `App.vue` — 脚手架模板，无实际内容
+- 🟡 `stores/counter.ts` — 脚手架示例 store，需替换
+- ❌ 无 API 客户端（axios）
+- ❌ 无 TypeScript 类型定义
+- ❌ 无 auth store（登录态管理）
+- ❌ 无任何业务页面
+
+## 11.2 建议开发顺序
+
+采取「自底向上」的策略，逐步堆叠：
+
+```
+阶段 1: 基础设施（2-3 个文件）
+  ├── 安装 axios
+  ├── 创建 src/api/client.ts（axios 实例 + 拦截器）
+  ├── 创建 src/types/index.ts（TS 接口定义）
+  └── 创建 src/stores/auth.ts（登录态 Pinia store）
+
+阶段 2: 布局与路由（3-4 个文件）
+  ├── 创建 src/layouts/DefaultLayout.vue（导航栏 + 内容区）
+  ├── 完善 src/router/index.ts（路由表 + 守卫）
+  └── 重写 src/App.vue（<RouterView />）
+
+阶段 3: 页面开发（4 个页面组件）
+  ├── src/views/LoginView.vue
+  ├── src/views/GiftBookListView.vue
+  ├── src/views/GiftBookDetailView.vue
+  └── src/views/admin/AdminDashboard.vue（可选，后续）
+
+阶段 4: 对接收尾
+  ├── 前后端联调
+  └── 错误处理、loading 状态优化
+```
+
+## 11.3 阶段一：基础设施详解
+
+### axios 客户端 (`src/api/client.ts`)
+
+核心职责：创建统一的 axios 实例，自动处理 baseURL、token 注入、401 拦截。
+
+设计要点：
+- `baseURL: 'http://localhost:8080'`（从环境变量读取更好，学习阶段写死也行）
+- **请求拦截器**：从 Pinia auth store 获取 token，加到 `Authorization: Bearer xxx` 请求头
+- **响应拦截器**：遇到 401 → 清除本地 token → 跳转登录页
+- 导出这个实例，所有 API 调用都通过它
+
+### TypeScript 类型 (`src/types/index.ts`)
+
+把后端模型一对一映射为 TS 接口：
+
+```ts
+// 用户
+interface User { id: number; username: string; role: string }
+// 登录请求/响应
+interface LoginRequest { username: string; password: string }
+interface LoginResponse { token: string }
+// 礼薄
+interface GiftBook { id: number; event_name: string; event_date: string; direction: string; created_by: string; records?: GiftRecord[] }
+// 礼金记录
+interface GiftRecord { id: number; gift_book_id: number; person_name: string; amount: number; address?: string; gift_note?: string }
+// 通用 API 响应
+interface ApiResponse<T> { data: T; message?: string }
+```
+
+### Auth Store (`src/stores/auth.ts`)
+
+Pinia store，管理登录状态。核心逻辑：
+
+- **state**：`token: string | null`、`user: User | null`
+- **getters**：`isLoggedIn`（判断 token 是否存在）、`isAdmin`（判断 user.role === 'admin'）
+- **actions**：
+  - `login(username, password)` → 调登录 API → 存 token 到 state + localStorage → 存 user
+  - `logout()` → 清除 token 和 user
+  - `checkAuth()` → 页面刷新时从 localStorage 恢复 token，调 API 验证有效性
+
+**token 持久化关键点**：token 同时存 Pinia state（内存）和 localStorage（持久化），刷新页面时从 localStorage 恢复。security 注意：生产环境应用 httpOnly cookie 或更安全的方案。
+
+## 11.4 阶段二：路由与布局
+
+### 路由表设计
+
+```
+/                    → 重定向到 /giftbooks
+/login               → LoginView（无需登录）
+/giftbooks           → GiftBookListView（需登录）
+/giftbooks/:id       → GiftBookDetailView（需登录）
+/admin               → AdminDashboard（需登录 + 管理员）
+```
+
+### 路由守卫
+
+利用 Vue Router 的 `beforeEach` 守卫：
+
+1. 从 Pinia auth store 读取 `isLoggedIn`
+2. 目标路由需要登录 (`meta.requiresAuth`) 且未登录 → 重定向到 `/login`
+3. 目标路由需要管理员 (`meta.requiresAdmin`) 且非管理员 → 重定向到首页
+4. 已登录用户访问 `/login` → 重定向到首页
+
+### DefaultLayout.vue
+
+app 外壳，包含：
+- 顶部导航栏（logo、礼薄列表链接、管理员入口（仅 admin 可见）、用户名/退出）
+- `<RouterView />` 插槽 — 页面内容渲染区
+
+## 11.5 阶段三：页面设计
+
+### 登录页 (LoginView)
+
+- 居中卡片式表单
+- 字段：用户名、密码
+- 登录按钮 + loading 状态 + 错误提示
+- 成功后跳转到 `/giftbooks`
+
+### 礼薄列表页 (GiftBookListView)
+
+- 调用 `GET /api/giftbooks`
+- 展示为卡片网格或表格
+- 每张卡片显示：事件名、日期、方向（来/往）、记录数
+- 点击卡片跳转详情页 `/giftbooks/:id`
+- 管理员可见"新建礼薄"按钮
+
+### 礼薄详情页 (GiftBookDetailView)
+
+- 调用 `GET /api/giftbook/:id`（含 Preload records）
+- 顶部：礼薄信息（事件名、日期、方向） + 编辑/删除按钮（管理员可见）
+- 下方：记录表格（人名、金额、地址、赠品）
+- 管理员可添加/编辑/删除单条记录
+- "返回列表"链接
+
+### 管理后台 (AdminDashboard)
+
+- 可以简化为一个页面，通过 Tab 切换管理礼薄和管理用户
+- 或者直接在列表页和详情页通过权限控制显示管理按钮
+
+## 11.6 前端项目建议目录结构
+
+```
+client/src/
+├── api/
+│   ├── client.ts        # axios 实例 + 拦截器
+│   ├── auth.ts          # 登录/用户相关 API 调用
+│   └── giftbook.ts      # 礼薄/记录相关 API 调用
+├── types/
+│   └── index.ts         # 所有 TS 接口/类型
+├── stores/
+│   └── auth.ts          # 登录态 Pinia store
+├── layouts/
+│   └── DefaultLayout.vue
+├── views/
+│   ├── LoginView.vue
+│   ├── GiftBookListView.vue
+│   ├── GiftBookDetailView.vue
+│   └── admin/
+│       └── AdminDashboard.vue
+├── components/          # 可复用组件
+│   ├── GiftBookCard.vue
+│   └── GiftRecordRow.vue
+├── router/
+│   └── index.ts
+├── App.vue
+└── main.ts
+```
+
+## 11.7 关键技术决策
+
+| 决策点 | 建议 | 原因 |
+|--------|------|------|
+| UI 组件库 | 先不引入，手写 CSS | 学习阶段，理解组件本质比用库更重要 |
+| HTTP 客户端 | axios | 拦截器机制方便 token 注入，社区标准 |
+| 状态管理 | Pinia | 已安装，Vue 3 官方推荐 |
+| Token 存储 | localStorage | 简单够用，学习阶段不引入 httpOnly cookie 的复杂度 |
+| 路由模式 | History | 已配置 `createWebHistory`，URL 干净 |
+| 类型安全 | 全 TS | 项目已是 TS 脚手架，充分利用类型系统 |
+
+## 11.8 更新：Element Plus 已引入
+
+用户已安装 Element Plus 并在 `main.ts` 中全局注册，11.7 的 UI 组件库决策更新为使用 Element Plus。
+
+---
+
+# 12. 路由与登录守卫
+
+## 12.1 核心概念：Tabs ≠ Router
+
+`el-tabs` 是 UI 组件，Vue Router 是路由系统，职责不同：
+
+| 维度 | el-tabs（UI 组件） | Vue Router（路由系统） |
+|------|-------------------|----------------------|
+| 切换方式 | 切换面板内容 | 切换 URL + 渲染页面组件 |
+| URL 变化 | 不变 | 变化（/giftbooks、/cards） |
+| 浏览器前进/后退 | 不支持 | 支持 |
+| 分享链接 | 无法分享 | 每个页面有独立 URL |
+| 适用场景 | 详情页内切换子面板 | 全局页面导航 |
+
+它们不互斥 —— 点击 tab 触发路由跳转，`<RouterView />` 渲染目标页面。
+
+## 12.2 推荐的组件层级
+
+```
+App.vue                  ← 最外层壳，只有 <RouterView />
+  ├── LoginView.vue      ← 登录页（不需要导航栏，独立渲染）
+  │
+  └── DefaultLayout.vue  ← 带导航栏的布局壳
+        ├── 导航栏（el-tabs 或 el-menu）
+        └── <RouterView />  ← 子路由页面渲染在这里
+              ├── HomeView.vue
+              ├── CardsView.vue
+              ├── GiftBookListView.vue
+              ├── GiftBookDetailView.vue
+              └── ...
+```
+
+**为什么这样拆？** 
+- 登录页不需要导航栏，直接由 `App.vue` 的顶级 `<RouterView />` 渲染
+- 需要导航栏的页面共用 `DefaultLayout`，在 `children` 里定义
+- 每个页面是独立组件，职责单一
+
+## 12.3 路由表设计
+
+```ts
+routes: [
+  // ① 不需要导航栏的 —— 顶级路由
+  {
+    path: '/login',
+    name: 'login',
+    component: () => import('@/views/LoginView.vue'),
+    meta: { requiresAuth: false },
+  },
+
+  // ② 需要导航栏的 —— 嵌套在 DefaultLayout 下
+  {
+    path: '/',
+    component: () => import('@/layouts/DefaultLayout.vue'),
+    redirect: '/home',
+    children: [
+      {
+        path: 'home',
+        name: 'home',
+        component: () => import('@/views/HomeView.vue'),
+        meta: { title: '首页', requiresAuth: true },
+      },
+      {
+        path: 'cards',
+        name: 'cards',
+        component: () => import('@/views/CardsView.vue'),
+        meta: { title: '人情卡片', requiresAuth: true },
+      },
+      {
+        path: 'giftbooks',
+        name: 'giftbooks',
+        component: () => import('@/views/GiftBookListView.vue'),
+        meta: { title: '礼薄', requiresAuth: true },
+      },
+      {
+        path: 'giftbooks/:id',
+        name: 'giftbook-detail',
+        component: () => import('@/views/GiftBookDetailView.vue'),
+        meta: { title: '礼薄详情', requiresAuth: true, hidden: true },
+      },
+    ],
+  },
+
+  // ③ 404 兜底
+  {
+    path: '/:pathMatch(.*)*',
+    redirect: '/home',
+  },
+]
+```
+
+### 设计要点
+
+| 要点 | 说明 |
+|------|------|
+| `children` | `DefaultLayout` 里放 `<RouterView />`，子路由页面渲染在那个位置 |
+| `meta` | 存附加信息：标题、是否需要登录（`requiresAuth`）、是否在导航中隐藏（`hidden`） |
+| `() => import(...)` | 懒加载：访问时才加载 JS，首屏更快 |
+| `redirect` | 访问 `/` 自动跳 `/home` |
+
+## 12.4 Tabs 和 Router 联动
+
+`DefaultLayout.vue` 里把 `el-tabs` 和 router 绑定：
+
+**核心逻辑：**
+```ts
+const tabs = [
+  { name: 'home',      label: '首页',     path: '/home' },
+  { name: 'cards',     label: '人情卡片', path: '/cards' },
+  { name: 'giftbooks', label: '礼薄',     path: '/giftbooks' },
+]
+
+const activeTab = ref('home')
+
+// 点击 tab → 路由跳转
+const handleClick = (tab) => {
+  const target = tabs.find(t => t.name === tab.paneName)
+  if (target) router.push(target.path)
+}
+
+// 路由变化 → 同步 tab 高亮（处理浏览器前进/后退、直接输入 URL）
+watch(() => route.path, (path) => {
+  const tab = tabs.find(t => path.startsWith(t.path))
+  if (tab) activeTab.value = tab.name
+}, { immediate: true })
+```
+
+**为什么需要双向绑定？** 用户可能通过浏览器前进/后退改变 URL，也可能直接输入地址，`watch` 保证 tab 高亮始终和当前路由一致。
+
+## 12.5 路由守卫：未登录跳转登录页
+
+### 流程图
+
+```
+用户访问任何页面
+      │
+      ▼
+┌──────────────┐
+│ beforeEach   │  ← 每次导航前触发
+│ 路由守卫     │
+└──────┬───────┘
+       │
+       ├── 目标页面不需要登录？（path 在白名单里）
+       │      → 直接放行 ✅
+       │
+       ├── 目标页面需要登录 + 已登录（有 token）？
+       │      → 放行 ✅
+       │
+       ├── 目标页面需要登录 + 未登录（无 token）？
+       │      → 跳转 /login ❌（同时记住目标路径，登录后跳回来）
+       │
+       └── 已登录 + 访问 /login？
+              → 跳转首页 ❌（登录了还去登录页干嘛）
+```
+
+### 守卫代码逻辑
+
+```ts
+router.beforeEach((to, from, next) => {
+  // ① 判断是否已登录 —— 看 token 有没有值
+  const token = localStorage.getItem('token')  // 或从 auth store 读
+  const isLoggedIn = !!token
+
+  // ② 白名单路由 —— 不需要登录也能访问
+  const whiteList = ['/login']
+
+  if (whiteList.includes(to.path)) {
+    // 已登录 + 去登录页 → 跳首页
+    if (isLoggedIn) {
+      next('/home')
+      return
+    }
+    // 未登录 + 去登录页 → 放行
+    next()
+    return
+  }
+
+  // ③ 需要登录的页面 + 未登录 → 跳登录页（记住目标路径）
+  if (!isLoggedIn) {
+    next({
+      path: '/login',
+      query: { redirect: to.fullPath }  // 登录完跳回来
+    })
+    return
+  }
+
+  // ④ 已登录 → 正常放行
+  next()
+})
+```
+
+### 为什么用 localStorage 判断而不是 Pinia？
+
+`router/index.ts` 在 `app.use(pinia)` 之前执行，此时 `useAuthStore()` 可能还没初始化。用 `localStorage.getItem('token')` 是最稳妥的，没有时机问题。
+
+**数据流：**
+```
+登录成功 → 写 localStorage + 写 Pinia state
+刷新页面 → 从 localStorage 恢复 token → Pinia 初始化时读 localStorage
+路由守卫 → 读 localStorage 判断（零依赖，无时机问题）
+```
+
+## 12.6 axios 拦截器：token 过期的兜底
+
+路由守卫只管 token **有没有**，不管 token **是否过期**。过期的兜底交给 axios 响应拦截器：
+
+```
+调用 API → 后端返回 401 → axios 拦截器捕获
+  ├── 清空 localStorage token
+  ├── 清空 Pinia user state
+  └── 跳转 /login
+```
+
+这样形成双层防线：
+- **路由守卫**：没 token → 连页面都不让进
+- **axios 拦截器**：有 token 但过期了 → API 调不通 → 踢回登录页
+
+## 12.7 常见坑
+
+| 坑 | 原因 | 方案 |
+|----|------|------|
+| 守卫里 `useAuthStore()` 报错 | pinia 还没挂载到 app | 用 `localStorage.getItem('token')` 判断，不依赖 store |
+| 刷新后 token 还在但登录态丢了 | token 只存了 Pinia state，没持久化 | login 时同时写 localStorage |
+| 已过期 token 不被拦截 | 路由守卫只看 token 存不存在 | axios 拦截器兜底 401 |
+| 登录后跳不回之前的页面 | 跳登录时没记录来源 | `query: { redirect: to.fullPath }` 传递 |
+| Tabs 高亮和当前页面不一致 | 只绑了点击事件，没监听 URL 变化 | `watch(route.path)` 双向同步 |
+
+## 12.8 关于 el-tabs vs el-menu
+
+`el-tabs` 适合做**内容面板切换**（如详情页里切换"基本信息"和"记录列表"），做全局导航不太自然。
+
+Element Plus 的正统导航组件是 **`el-menu`**：
+- `mode="horizontal"` → 顶部导航
+- `mode="vertical"` → 侧边栏导航
+- 自带 `router` 属性，不用手动写点击联动
+
+当前学习阶段用 `el-tabs` 理解联动原理没问题，后期可以考虑迁移到 `el-menu`。
+
+---
+
+# 13. axios 客户端详解
+
+## 13.1 文件位置
+
+`client/src/axios.ts`（用户已创建）
+
+## 13.2 逐行解析
+
+```ts
+import axios from 'axios'
+```
+引入 axios 库。
+
+```ts
+const instance = axios.create({
+    baseURL: 'http://localhost:8080/api',
+})
+```
+
+创建 **axios 实例**（可以理解为"配置好的 axios 副本"）。
+
+**`baseURL` 的作用：** 之后发请求只需要写路径片段，axios 自动拼接前缀：
+
+```ts
+// 写：
+instance.get('/giftbooks')
+
+// axios 实际请求：
+// http://localhost:8080/api/giftbooks
+```
+
+**为什么用实例而不是直接用 `axios.get()`？** baseURL 不用每次都写，改端口也只改一处。所有 API 调用共享同一个配置。
+
+```ts
+instance.interceptors.request.use(config => {
+    const token = localStorage.getItem('token')
+    if (token) {
+        config.headers.Authorization = `Bearer ${token}`
+    }
+    return config
+})
+```
+
+**请求拦截器（Request Interceptor）**——每次请求发出前自动执行。
+
+执行流程：
+```
+调用 instance.get('/giftbooks')
+        │
+        ▼
+┌──────────────────────────────┐
+│ 拦截器执行：                  │
+│ 1. 从 localStorage 拿 token   │
+│ 2. 如果有 token → 塞到请求头  │
+│     Authorization: Bearer xxx │
+│ 3. return config（放行请求）   │
+└──────────────┬───────────────┘
+        ▼
+   真正的 HTTP 请求发出
+```
+
+**好处：** 每次发请求都不用手动写 `Authorization` 头，拦截器自动帮你加。
+
+## 13.3 当前缺失
+
+| 缺失 | 说明 |
+|------|------|
+| **`export`** | 没 `export default instance`，别的文件无法 `import` 它 |
+| **响应拦截器** | 没有处理 401（token 过期），过期 token 不会被踢掉 |
+
+## 13.4 响应拦截器详解
+
+### 它做什么？
+
+响应拦截器在**每个 HTTP 响应回来后**自动执行，在业务代码拿到数据之前先拦截处理：
+
+```
+后端响应
+    │
+    ▼
+┌──────────────────────────────┐
+│ 响应拦截器执行：               │
+│ 1. 检查响应状态码              │
+│ 2. 如果是 401 → 踢到登录页     │
+│ 3. 如果是 2xx → 正常返回数据    │
+│ 4. 其他错误 → 统一提示          │
+└──────────────┬───────────────┘
+    │
+    ▼
+业务代码拿到结果
+```
+
+### 为什么需要它？
+
+路由守卫只管 token **有没有**，不管 token **是否过期**。如果 token 已过期（24 小时后）还留在 localStorage，路由守卫会误以为已登录。响应拦截器是第二层防线：
+
+```
+双层防线：
+  ┌─ 路由守卫（进入页面前）   → 没 token → 拦下，跳登录
+  └─ 响应拦截器（调 API 之后） → token 过期 → 清除后跳登录
+```
+
+### 代码实现
+
+```ts
+// 响应拦截器 —— 放在 instance 创建和请求拦截器之后
+instance.interceptors.response.use(
+  // 第一个参数：响应成功（2xx）时走这里
+  (response) => {
+    return response
+  },
+
+  // 第二个参数：响应失败（非 2xx）时走这里
+  (error) => {
+    if (error.response) {
+      const status = error.response.status
+
+      if (status === 401) {
+        // token 无效或过期 → 清理本地数据 + 跳登录页
+        localStorage.removeItem('token')
+        localStorage.removeItem('user')
+        // 跳登录页（用 window.location 而不是 router.push，
+        // 因为这里不在 Vue 组件内，拿不到 router 实例）
+        window.location.href = '/login'
+      } else if (status === 403) {
+        // 可选：权限不足的提示
+        console.warn('权限不足')
+      } else if (status >= 500) {
+        // 可选：服务器错误的提示
+        console.error('服务器错误')
+      }
+    } else {
+      // 网络错误（断网、CORS 等），连 response 都没有
+      console.error('网络错误')
+    }
+
+    // 继续抛出错误，让调用的业务代码也能感知
+    return Promise.reject(error)
+  }
+)
+```
+
+### 两个参数的含义
+
+`axios` 的响应拦截器有两个回调：
+
+| 参数 | 触发条件 | 做什么 |
+|------|---------|--------|
+| 第一个 `(response)` | HTTP 状态码 2xx | 正常返回数据，通常直接 `return response` |
+| 第二个 `(error)` | HTTP 状态码非 2xx 或网络错误 | 按状态码分类处理 |
+
+### 关键细节：为什么用 `window.location.href` 而不是 `router.push`？
+
+响应拦截器在 `axios.ts` 里，这是一个普通 JS 文件，**不在 Vue 组件内**，拿不到 Vue Router 的 `router` 实例。所以用原生的 `window.location.href` 做跳转，效果等价——都会改变 URL 并触发页面重新渲染。
+
+如果一定要用 `router.push`，需要把 `router` 实例导入进来：
+```ts
+import router from '@/router'
+// ...
+router.push('/login')
+```
+但这样 `axios.ts` 就和 Vue Router 耦合了，不是必须的话不推荐。
+
+### 完整文件结构
+
+```ts
+import axios from 'axios'
+
+// 1. 创建实例
+const instance = axios.create({
+    baseURL: 'http://localhost:8080/api',
+})
+
+// 2. 请求拦截器 —— 自动加 token
+instance.interceptors.request.use(config => {
+    const token = localStorage.getItem('token')
+    if (token) {
+        config.headers.Authorization = `Bearer ${token}`
+    }
+    return config
+})
+
+// 3. 响应拦截器 —— 统一错误处理
+instance.interceptors.response.use(
+    (response) => response,
+    (error) => {
+        if (error.response?.status === 401) {
+            localStorage.removeItem('token')
+            localStorage.removeItem('user')
+            window.location.href = '/login'
+        }
+        return Promise.reject(error)
+    }
+)
+
+// 4. 导出（关键！不然别的文件 import 不了）
+export default instance
+```
+
+## 13.5 拦截器执行顺序（重要）
+
+一个请求的完整生命周期：
+
+```
+发起请求                   响应回来
+──────────────→          ←─────────────
+[请求拦截器] → [真实请求] → [响应拦截器] → 业务代码
+    ①             ②            ③           ④
+
+① 加 token、loading 状态
+② 网络传输
+③ 处理 401、统一错误提示
+④ 拿到干净的 response.data
+```
+
+理解这个顺序，调试时就知道问题出在哪个环节。
+
+---
+
+# 14. Prettier 代码格式化配置
+
+## 14.1 已创建的文件
+
+| 文件 | 作用 |
+|------|------|
+| `client/.prettierrc` | Prettier 格式化规则 |
+| `client/.prettierignore` | 忽略格式化的目录 |
+| `client/.vscode/settings.json` | VSCode 保存时自动格式化 |
+
+## 14.2 .prettierrc 配置说明
+
+```json
+{
+  "semi": false,
+  "singleQuote": true,
+  "trailingComma": "all",
+  "printWidth": 100,
+  "tabWidth": 2
+}
+```
+
+| 配置 | 值 | 含义 |
+|------|----|------|
+| `semi` | `false` | 语句结尾不加分号（Vue 社区主流风格） |
+| `singleQuote` | `true` | 用单引号而非双引号 |
+| `trailingComma` | `"all"` | 多行末尾加逗号，git diff 更干净 |
+| `printWidth` | `100` | 每行最长 100 字符自动换行 |
+| `tabWidth` | `2` | 缩进 2 空格 |
+
+## 14.3 VSCode 自动格式化
+
+`client/.vscode/settings.json` 新增了：
+
+```json
+"editor.formatOnSave": true,
+"editor.defaultFormatter": "esbenp.prettier-vscode"
+```
+
+**前提：** 需要安装 VSCode 扩展 `esbenp.prettier-vscode`。如果没装，VSCode 右下角会提示或者去扩展商店搜索 "Prettier" 安装。
+
+效果：每次 `Ctrl+S` 保存 → Prettier 自动格式化当前文件，不用手动操作。
+
+## 14.4 使用方式
+
+```bash
+# 手动格式化整个 src 目录
+npx prettier --write src/
+
+# 只检查不修改（CI 用）
+npx prettier --check src/
+```
+
+## 14.5 安装步骤回顾
+
+```bash
+cd client
+npm install -D prettier
+```
+
+然后创建上述 3 个配置文件即可。Prettier 本身已安装完成，可以立即使用。
