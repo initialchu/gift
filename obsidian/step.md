@@ -1834,3 +1834,191 @@ const instance = axios.create({
 - **仅开发环境生效**：`server.proxy` 只在 `npm run dev` 时工作，生产构建 `npm run build` 不包含代理
 - **修改 vite.config.ts 后要重启**：Vite 不会热更新自身配置，需要 `Ctrl+C` 停掉再 `npm run dev`
 - **生产环境**：部署时通常用 Nginx 做反向代理，配置逻辑类似
+
+---
+
+# 19. 弹窗表单模式（el-dialog + el-form）
+
+## 19.1 场景
+
+页面有一个按钮 → 点击后弹出带表单的对话框 → 填写 → 提交。最常用模式：`el-button` + `el-dialog` + `el-form`。
+
+## 19.2 结构
+
+```
+页面
+  ├── el-button（触发按钮）
+  └── el-dialog（弹窗对话框，v-model 控制显示/隐藏）
+        ├── el-form（表单内容）
+        │     ├── el-form-item + el-input
+        │     ├── el-form-item + el-radio-group
+        │     └── el-form-item + el-date-picker
+        └── <template #footer>（底部确定/取消按钮）
+```
+
+## 19.3 核心三要素
+
+### ① 触发按钮
+
+```html
+<el-button type="primary" @click="dialogVisible = true">新建礼薄</el-button>
+```
+
+### ② 弹窗对话框
+
+```html
+<el-dialog v-model="dialogVisible" title="新建礼薄" width="500px">
+  <!-- 表单内容 -->
+</el-dialog>
+```
+
+`v-model="dialogVisible"` 双向绑定弹窗开关：
+- `true` → 弹窗打开
+- `false` → 弹窗关闭（点 X、点遮罩、按 ESC 都会自动设为 false）
+
+### ③ 表单
+
+```html
+<el-form :model="form" label-width="80px">
+  <el-form-item label="事件名称">
+    <el-input v-model="form.eventName" placeholder="请输入" />
+  </el-form-item>
+  <el-form-item label="方向">
+    <el-radio-group v-model="form.direction">
+      <el-radio value="来">来</el-radio>
+      <el-radio value="往">往</el-radio>
+    </el-radio-group>
+  </el-form-item>
+  <el-form-item label="日期">
+    <el-date-picker v-model="form.eventDate" type="date" />
+  </el-form-item>
+</el-form>
+```
+
+### 底部按钮
+
+```html
+<template #footer>
+  <el-button @click="dialogVisible = false">取消</el-button>
+  <el-button type="primary" @click="handleSubmit">确定</el-button>
+</template>
+```
+
+`<template #footer>` 是 el-dialog 的具名插槽，放弹窗底部的操作按钮。
+
+## 19.4 脚本逻辑
+
+```ts
+import { ref } from 'vue'
+
+const dialogVisible = ref(false)
+
+const form = ref({
+  eventName: '',
+  eventDate: '',
+  direction: '来',
+})
+
+const handleSubmit = async () => {
+  // 调 API 提交
+  await axios.post('/admin/giftbook', form.value)
+  dialogVisible.value = false
+  // 成功后刷新列表
+}
+```
+
+## 19.5 完整交互流程
+
+```
+点击"新建礼薄"
+  → dialogVisible = true
+  → 弹窗打开，表单为空
+  → 用户填写
+  → 点"确定"
+      → handleSubmit()
+      → 调 API
+      → dialogVisible = false（关弹窗）
+      → 刷新列表
+  → 点"取消" / 按 ESC / 点遮罩
+      → dialogVisible = false（自动）
+      → 表单数据丢弃
+```
+
+## 19.6 常见错误：`:model` 写成 `model`
+
+```html
+<!-- ❌ 错误：传的是字符串 "form" -->
+<el-form model="form">
+
+<!-- ✅ 正确：传的是变量 form（ref 对象） -->
+<el-form :model="form">
+```
+
+| 写法 | 传给组件 | 结果 |
+|------|---------|------|
+| `model="form"` | 字符串 `"form"` | el-form 收到 String，报类型错误 |
+| `:model="form"` | ref 对象 | el-form 收到 Object，正常 |
+
+Vue 中 `:` 是 `v-bind` 的缩写，不加 `:` 的属性值永远是字符串。任何需要传对象、数组、布尔值的 prop 都要加 `:`。
+
+---
+
+# 20. 2026-05-31 进度记录
+
+## 20.1 今日完成
+
+| # | 模块 | 内容 | 文件 |
+|---|------|------|------|
+| 1 | 弹窗表单 | el-dialog + el-form 新建礼薄弹窗 | GiftBooks.vue |
+| 2 | 礼薄展示 | el-table 展示礼薄列表，onMounted 拉数据 | GiftBooks.vue |
+| 3 | el-radio 修复 | direction 值从 "1"/"2" 改为 "来"/"往" | GiftBooks.vue |
+| 4 | 笔记更新 | 弹窗表单模式（第 19 章） | step.md |
+
+## 20.2 GiftBooks.vue 当前状态
+
+**已完成：**
+- el-dialog 新建礼薄弹窗（事件名、方向 radio、日期选择器）
+- createGiftBook 函数（调 POST /admin/giftbook）
+- el-table 展示礼薄列表
+- onMounted 加载列表数据
+
+**待完成（明天）：**
+- 修复 el-date-picker 日期格式（后端 time.Time 需要正确格式）
+- el-table 加操作列（编辑、删除按钮）
+- newApi 创建礼薄成功后刷新列表
+- 删除礼薄功能
+- 编辑礼薄弹窗
+- 点击行跳转详情页（/giftbooks/:id）
+
+## 20.3 整体项目进度
+
+```
+后端（Go/Gin/GORM）     ████████████████████ 95%
+  ├── 用户认证           ████████████████████ ✅
+  ├── 礼薄 CRUD          ████████████████████ ✅
+  ├── 礼金记录 CRUD      ████████████████████ ✅
+  └── 优雅关闭           ████████████████████ ✅
+
+前端（Vue 3 + Element Plus）  ████████░░░░░░░░░░ 45%
+  ├── 基础设施            ████████████████████ ✅
+  │   ├── axios + 代理    ████████████████████ ✅
+  │   ├── auth store       ████████████████████ ✅
+  │   ├── 路由 + 守卫      ████████████████████ ✅
+  │   ├── App.vue 容器     ████████████████████ ✅
+  │   ├── DefaultLayout    ████████████████████ ✅
+  │   └── Prettier         ████████████████████ ✅
+  ├── 登录页              ████████████████████ ✅
+  ├── 导航栏 + 头像        ██████████░░░░░░░░░░ ⚠️ 进行中
+  └── 业务页面            ████░░░░░░░░░░░░░░░░ 🚧
+      ├── 礼薄列表页       ██████░░░░░░░░░░░░ ⚠️ 弹窗+表格基本完成
+      ├── 礼薄详情页       ░░░░░░░░░░░░░░░░░░ ❌
+      ├── 人情卡片页       ░░░░░░░░░░░░░░░░░░ ❌
+      └── 首页             ░░░░░░░░░░░░░░░░░░ ❌
+```
+
+## 20.4 明日待办优先
+
+1. 完善 GiftBooks.vue（日期格式、操作列、删除、编辑）
+2. 实现 GiftBookDetailView（点击行跳转详情，展示记录列表）
+3. 完成 Avatar 头像区域
+4. 补充 Home.vue 首页内容

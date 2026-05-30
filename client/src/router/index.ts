@@ -43,28 +43,28 @@ const router = createRouter({
 })
 
 // 路由守卫：未登录用户访问受保护的路由时，重定向到登录页
-router.beforeEach((to, from, next) => {
+router.beforeEach((to, from) => {
   const token = localStorage.getItem('token')
 
   // 目标页面不需要登录，直接放行
   if (to.meta.requiresAuth !== true) {
     // 已登录用户访问 /login → 跳首页
     if (token && to.path === '/login') {
-      next('/home')
-      return
+      return('/home')
+      
     }
-    next()
+   
     return
   }
 
   // 目标页面需要登录，但没有 token，重定向到登录页
   if (!token) {
-    next({ path: '/login', query: { redirect: to.fullPath } })
-    return
+    return{ path: '/login', query: { redirect: to.fullPath } }
+    
   }
 
   // 目标页面需要登录，且有 token，放行
-  next()
+  return
 })
 
 export default router
