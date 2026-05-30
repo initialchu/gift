@@ -23,14 +23,14 @@
 | 配置管理 | Viper |
 | 鉴权 | JWT（golang-jwt/jwt/v5） |
 | 密码加密 | bcrypt |
-| 前端 | 待定 |
+| 前端 | Vue 3 + Vite + TypeScript |
 
 ## 项目结构
 
 ```
 gift/
 ├── server/
-│   ├── main.go                  # 应用入口（含种子数据初始化）
+│   ├── main.go                  # 应用入口（优雅关闭 + 种子数据初始化）
 │   ├── go.mod                   # Go 模块定义
 │   ├── config/
 │   │   ├── config.go            # 配置加载（Viper）
@@ -44,7 +44,7 @@ gift/
 │   │   ├── auth.go              # 登录
 │   │   ├── user.go              # 用户管理
 │   │   ├── giftbook.go          # 礼薄 CRUD
-│   │   └── giftrecord.go        # 礼金记录 CRUD
+│   │   └── giftrecord.go        # 礼金记录 CRUD（含归属校验）
 │   ├── middlewares/
 │   │   └── auth.go              # AuthMiddleware（JWT 鉴权）+ AdminMiddleware（管理员授权）
 │   ├── router/
@@ -53,6 +53,16 @@ gift/
 │   │   └── utils.go             # bcrypt 密码工具 + JWT 生成/解析
 │   └── global/
 │       └── global.go            # 全局变量（DB 实例）
+├── client/                      # 前端（Vue 3 + Vite + TypeScript）
+│   ├── src/
+│   │   ├── App.vue
+│   │   ├── main.ts
+│   │   ├── router/
+│   │   │   └── index.ts
+│   │   └── stores/
+│   │       └── counter.ts
+│   ├── index.html
+│   └── vite.config.ts
 ├── obsidian/
 │   └── step.md                  # 开发笔记
 └── README.md
@@ -70,20 +80,21 @@ gift/
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| GET | `/api/gift-books` | 礼薄列表 |
-| GET | `/api/gift-books/:id` | 礼薄详情（含所有记录） |
+| GET | `/api/giftbooks` | 礼薄列表 |
+| GET | `/api/giftbook/:id` | 礼薄详情（含所有记录） |
+| GET | `/api/giftrecord/:id/records` | 指定礼薄的礼金记录列表 |
 
-### 管理员接口（需 JWT + Admin 权限）
+### 管理员接口（JWT + Admin）
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
 | POST | `/api/admin/create` | 创建用户 |
-| POST | `/api/admin/gift-books` | 创建礼薄 |
-| PUT | `/api/admin/gift-books/:id` | 修改礼薄 |
-| DELETE | `/api/admin/gift-books/:id` | 删除礼薄 |
-| POST | `/api/admin/gift-books/:id/records` | 添加礼金记录 |
-| PUT | `/api/admin/gift-books/:id/records/:rid` | 修改礼金记录 |
-| DELETE | `/api/admin/gift-books/:id/records/:rid` | 删除礼金记录 |
+| POST | `/api/admin/giftbook` | 创建礼薄 |
+| POST | `/api/admin/giftbook/edit/:id` | 修改礼薄 |
+| POST | `/api/admin/giftbook/:id` | 删除礼薄（级联删除记录） |
+| POST | `/api/admin/giftrecord/:id/records` | 添加礼金记录 |
+| POST | `/api/admin/giftrecord/:id/records/:rid` | 删除礼金记录 |
+| POST | `/api/admin/giftrecord/:id/records/:rid/edit` | 修改礼金记录 |
 
 ## 快速开始
 
@@ -91,8 +102,9 @@ gift/
 
 - Go 1.26+
 - MySQL 8.0+
+- Node.js 20+（前端开发）
 
-### 配置
+### 后端配置
 
 1. 复制 `server/config/config.yml` 为 `server/config/config.local.yml`
 2. 编辑 `config.local.yml`，填入真实的数据库密码、JWT 密钥等敏感信息：
@@ -113,11 +125,17 @@ jwt:
 ### 运行
 
 ```bash
+# 后端
 cd server
 go run main.go
+
+# 前端（新终端）
+cd client
+npm install
+npm run dev
 ```
 
-服务默认监听 `:8080`。
+后端端口通过 `config.yml` 中 `app.port` 配置（默认 `:8080`）。服务支持优雅关闭（Ctrl+C 后等待最多 5 秒处理完现有请求）。
 
 ## 许可证
 

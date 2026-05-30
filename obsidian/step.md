@@ -539,17 +539,157 @@ admin.Use(middlewares.AuthMiddleware())
 
 ---
 
-### 待完成
+## 2026-05-29 晚：礼金记录函数 Code Review
 
-| # | 文件 | 内容 |
-|---|------|------|
-| 1 | `controllers/giftrecord.go` | 修改礼金记录函数 |
-| 2 | `controllers/giftrecord.go` | 删除礼金记录函数 |
-| 3 | `router/router.go` | 挂接礼薄和记录的全部路由 |
+对 `controllers/giftrecord.go` 中新增的三个函数进行审查。
+
+### GetGiftRecordsbyID — 基本正确 ✅
+
+```go
+func GetGiftRecordsbyID(c *gin.Context) {
+    giftBookID := c.Param("giftbook_id")
+    var giftRecords []models.GiftRecord
+    if err := global.DB.Where("gift_book_id = ?", giftBookID).Find(&giftRecords).Error; err != nil {
+        ...
+    }
+}
+```
+
+逻辑清晰，查某个礼薄下的所有记录。
+
+**建议**：加礼薄存在性校验（和 `AddGift` 保持一致），否则查不存在的礼薄返回空数组 `[]`，调用方无法区分「礼薄不存在」还是「礼薄没有记录」。
+
+### DeleteGift — 两个隐患 ⚠️
+
+```go
+func DeleteGift(c *gin.Context) {
+    giftID := c.Param("gift_id")
+    if err := global.DB.Delete(&models.GiftRecord{}, giftID).Error; err != nil {
+        ...
+    }
+}
+```
+
+**问题一：不验证记录是否存在**
+
+GORM 的 `Delete` 即使找不到记录也不会报错（影响行数 0），永远返回「删除成功」，实际可能什么都没删。参照 `DeleteGiftBook` 的写法（先 `First` 确认存在再删），应该加存在性检查。
+
+**问题二：没有校验记录属于哪个礼薄**
+
+路由设计是 `/api/admin/gift-books/:id/records/:rid`，删除时应确认该记录确实属于 URL 中指定的礼薄，否则用户可以跨礼薄删除任意记录。
+
+### UpdateGift — 隐患最大 ⚠️⚠️
+
+```go
+func UpdateGift(c *gin.Context) {
+    giftID := c.Param("gift_id")
+    var giftRecord models.GiftRecord
+    if err := c.ShouldBindJSON(&giftRecord); err != nil { ... }
+    if err := global.DB.Model(&models.GiftRecord{}).Where("id = ?", giftID).Updates(giftRecord).Error; err != nil { ... }
+}
+```
+
+**问题一：用 struct 做 Updates 是不安全的**
+
+传入整个 `giftRecord` struct 给 `Updates`，如果请求体里传了 `gift_book_id`，就能把记录转移到另一个礼薄下（越权）。而且 `ID`、`CreatedAt` 等 GORM 自动字段也可能被覆盖。
+
+应参照 `UpdateGiftBook` 的写法，用 `map[string]interface{}` 白名单限定允许更新的字段：
+
+```go
+update := map[string]interface{}{
+    "person_name": giftRecord.PersonName,
+    "amount":      giftRecord.Amount,
+    "address":     giftRecord.Address,
+    "gift_note":   giftRecord.GiftNote,
+}
+```
+
+**问题二：不验证记录是否存在**（同上）
+
+**问题三：不验证记录属于哪个礼薄**（同上）
+
+### 总结对比表
+
+| 函数 | 存在性校验 | 礼薄归属校验 | 字段白名单 |
+|------|:---:|:---:|:---:|
+| `GetGiftRecordsbyID` | 建议加 | — | ✅ |
+| `DeleteGift` | ❌ 缺失 | ❌ 缺失 | ✅ |
+| `UpdateGift` | ❌ 缺失 | ❌ 缺失 | ❌ struct 不安全 |
+
+**核心原则**：URL 里的参数（礼薄 ID、记录 ID）都要做归属校验，防止越权操作。
+
+---
+
+---
+
+## 2026-05-29 深夜：修复完成 — 礼金记录 CRUD + 路由挂接
+
+### 修复内容
+
+| # | 文件 | 修复项 | 说明 |
+|---|------|--------|------|
+| 1 | `giftrecord.go` AddGift | URL 参数校验 | 比对 body 的 GiftBookID 和 URL 的 `:id`，防止跨礼薄写入 |
+| 2 | `giftrecord.go` GetGiftRecordsbyID | 礼薄存在性校验 | 先查礼薄是否存在，区分「礼薄不存在」和「无记录」 |
+| 3 | `giftrecord.go` DeleteGift | 存在性 + 归属校验 | 先 First 确认存在，再比对 GiftBookID 与 URL `:id` |
+| 4 | `giftrecord.go` UpdateGift | 存在性 + 归属校验 + 字段白名单 | 用 map 限定可更新字段，防止越权修改 gift_book_id |
+| 5 | `router/router.go` | 挂接全部路由 | 礼薄 CRUD + 礼金记录 CRUD，路由含双参数支持归属校验 |
+
+### `strconv.ParseUint` 类型转换要点
+
+`c.Param()` 返回 `string`，不能直接 `uint(xxx)` 强转：
+
+```go
+import "strconv"
+
+gbID, err := strconv.ParseUint(c.Param("id"), 10, 64)  // string → uint64
+if err != nil {
+    // ID 格式错误
+}
+// 比较时：uint(gbID) 转为 uint
+if record.GiftBookID != uint(gbID) { ... }
+```
+
+### 最终路由结构
+
+```
+admin 组（JWT + AdminMiddleware）：
+
+  POST   /giftbook                        → CreateGiftBook
+  GET    /giftbooks                       → GetgiftBooks
+  GET    /giftbook/:id                    → GetgiftBookbyID
+  POST   /giftbook/edit/:id               → UpdateGiftBook
+  POST   /giftbook/:id                    → DeleteGiftBook
+
+  POST   /giftrecord/:id/records          → AddGift
+  GET    /giftrecord/:id/records          → GetGiftRecordsbyID
+  POST   /giftrecord/:id/records/:rid      → DeleteGift
+  POST   /giftrecord/:id/records/:rid/edit → UpdateGift
+```
+
+设计选择：修改/删除操作统一用 POST（非 RESTful 约定），参数通过 URL 路径传递，归属校验用 `c.Param` 获取。
+
+### 安全校验清单（最终版）
+
+| 函数 | 存在性校验 | 礼薄归属校验 | 字段白名单 |
+|------|:---:|:---:|:---:|
+| `AddGift` | ✅ 礼薄存在 | ✅ URL:ID vs Body | — |
+| `GetGiftRecordsbyID` | ✅ 礼薄存在 | — | — |
+| `DeleteGift` | ✅ 记录存在 | ✅ GiftBookID vs URL | — |
+| `UpdateGift` | ✅ 记录存在 | ✅ GiftBookID vs URL | ✅ map 限定 |
+
+### 当前路由和控制器参数对应关系
+
+| 路由模式 | `c.Param` 取值 | 用途 |
+|----------|---------------|------|
+| `:id` | 礼薄 ID | 定位礼薄 |
+| `:rid` | 记录 ID | 定位记录 |
+
+所有函数中 `c.Param("id")` = 礼薄 ID，`c.Param("rid")` = 记录 ID，命名统一。
+
+---
 
 ### 下一步
 
-1. 完成剩余礼金记录 CRUD（修改、删除）
-2. 修改 `router/router.go` 挂接所有礼薄/记录路由
-3. 启动项目测试完整的礼薄增删改查流程
-4. 开始人情卡片模块设计
+1. 公开路由挂接：`api` 组加 `GET /gift-books` 和 `GET /gift-books/:id`（普通用户查看）
+2. 启动项目测试完整的礼薄 + 记录 CRUD 流程
+3. 开始人情卡片模块设计
