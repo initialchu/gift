@@ -59,23 +59,24 @@ gift/
 │       └── global.go            # 全局变量（DB 实例）
 ├── client/                      # 前端（Vue 3 + Vite + TypeScript + Element Plus）
 │   ├── src/
-│   │   ├── App.vue              # 根组件（el-menu 导航栏）
+│   │   ├── App.vue              # 根组件（纯路由容器 <RouterView />）
 │   │   ├── main.ts              # 应用入口（注册 Element Plus、Pinia、Router）
-│   │   ├── axios.ts             # Axios 实例（请求拦截器自动加 token + 响应拦截器处理 401）
+│   │   ├── axios.ts             # Axios 实例（请求/响应拦截器 + 代理后 baseURL 简化为 /api）
 │   │   ├── router/
-│   │   │   └── index.ts         # 路由定义（/login、/home、/card、/giftbooks）
+│   │   │   └── index.ts         # 路由定义 + beforeEach 登录守卫（嵌套结构）
 │   │   ├── stores/
-│   │   │   └── auth.ts          # 登录态 Pinia store
+│   │   │   └── auth.ts          # 登录态 Pinia store（token 双重存储 + JWT 解码）
 │   │   ├── components/
-│   │   │   └── Login.vue        # 登录组件
+│   │   │   └── Login.vue        # 登录表单（Element Plus 卡片表单）
 │   │   └── views/
-│   │       ├── Home.vue         # 首页
-│   │       ├── Card.vue         # 人情卡片
-│   │       └── GiftBooks.vue    # 礼薄列表
+│   │       ├── DefaultLayout.vue # 导航栏布局（el-menu + RouterView + footer）
+│   │       ├── Home.vue         # 首页（占位）
+│   │       ├── Card.vue         # 人情卡片（占位）
+│   │       └── GiftBooks.vue    # 礼薄列表（占位）
 │   ├── .prettierrc              # Prettier 格式化规则
 │   ├── .prettierignore          # Prettier 忽略目录
 │   ├── index.html
-│   └── vite.config.ts
+│   └── vite.config.ts           # Vite 配置（含 /api 代理到后端 :8080）
 ├── obsidian/
 │   └── step.md                  # 开发笔记
 └── README.md
@@ -152,9 +153,11 @@ npm run dev
 
 ### 前端开发说明
 
-- API 客户端 `axios.ts` 已配置请求拦截器（自动从 localStorage 注入 JWT token）+ 响应拦截器（401 自动清除 token 并跳转登录页）
-- VSCode 配置了 `"editor.formatOnSave": true`，保存时 Prettier 自动格式化
-- 登录组件（`components/Login.vue`）和路由表（`router/index.ts`）正在开发中
+- **Vite 代理**：`vite.config.ts` 已配置 `/api` 代理到 `http://localhost:8080`，开发时前端请求自动转发到后端，无需处理跨域
+- **API 客户端**：`axios.ts` baseURL 为 `/api`，请求拦截器自动注入 JWT token，响应拦截器处理 401（非登录页自动清除 token 并跳转登录页）
+- **登录流程**：`Login.vue` → `authStore.login()` → 解码 JWT 存 token + user → 跳回之前访问的页面
+- **路由守卫**：未登录自动重定向到 `/login`（携带 `?redirect=` 参数，登录后跳回目标页）
+- **代码格式化**：VSCode 配置了 `"editor.formatOnSave": true`，保存时 Prettier 自动格式化
 
 ## 许可证
 

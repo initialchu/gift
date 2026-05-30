@@ -1405,3 +1405,432 @@ npm install -D prettier
 ```
 
 然后创建上述 3 个配置文件即可。Prettier 本身已安装完成，可以立即使用。
+
+---
+
+# 15. 前端开发顺序（当前阶段）
+
+## 15.1 当前缺口分析
+
+```
+App.vue（el-menu）
+  ❌ 没有 <RouterView />        → 路由匹配了页面也没地方渲染
+  ❌ 菜单点击没跳转路由           → 点首页/卡片/礼薄，URL 不变
+
+router/index.ts
+  ❌ 没有 beforeEach 守卫       → 未登录也能进 /home
+
+stores/auth.ts
+  ❌ 只有 defineStore 导入      → 登录状态没管起来
+
+components/Login.vue
+  ❌ 空壳                      → 没有登录表单
+
+axios.ts
+  ✅ 已完成                     → 请求/响应拦截器就绪
+```
+
+## 15.2 开发顺序：先通登录链路，再填页面
+
+**原则：先让数据跑通（auth → guard → router），再让 UI 好看（表单 + 页面）。** 登录是整个应用的入口，它通了，后面所有页面都能拿到登录态。
+
+### 第一步：把线接通
+
+```
+auth.ts 写完整
+  → App.vue 补 <RouterView /> + 菜单绑定路由
+  → router 加 beforeEach 守卫
+```
+
+效果：未登录访问 `/home` → 自动跳到 `/login`，登录页面能渲染出来。
+
+### 第二步：实现登录
+
+```
+Login.vue 写登录表单
+  → 填用户名密码 → 调登录 API → 存 token → 跳首页
+```
+
+效果：输入账号密码 → 登录成功 → 进入首页看到导航栏 → 刷新不丢登录态。
+
+---
+
+# 16. Auth Store 设计
+
+## 16.1 Pinia Store 三块结构
+
+| 块 | 作用 | 示例 |
+|----|------|------|
+| `state` | 存数据 | token、user |
+| `getters` | 派生计算 | isLoggedIn、isAdmin |
+| `actions` | 行为方法 | login()、logout()、checkAuth() |
+
+## 16.2 State 设计
+
+```
+token    → JWT 字符串，整个应用的"通行证"。有 token = 已登录
+user     → { username, role }，当前用户信息
+```
+
+两个字段够用。token 是核心判断依据。
+
+## 16.3 Getters 设计
+
+| Getter | 计算方式 | 用途 |
+|--------|---------|------|
+| `isLoggedIn` | `!!state.token` | 路由守卫判断是否放行 |
+| `isAdmin` | `state.user?.role === 'admin'` | 控制管理按钮显隐 |
+
+getter 是派生状态，不用单独存，根据 state 实时算。
+
+## 16.4 Actions 设计
+
+| 方法 | 做什么 | 数据流向 |
+|------|--------|----------|
+| `login(username, password)` | 调登录 API → 拿 token → 存起来 | API → state + localStorage |
+| `logout()` | 清空 token 和 user | state 清空 + localStorage 清空 |
+| `checkAuth()` | 页面刷新后，从 localStorage 恢复登录态 | localStorage → state |
+
+## 16.5 核心设计：token 双重存储
+
+**为什么两个地方都要存？**
+
+```
+登录时：
+  API 返回 token
+    ├── 存到 Pinia state（内存）    → 当前页面立即可用，响应式
+    └── 存到 localStorage（硬盘）  → 刷新页面不丢
+
+刷新页面时：
+  Pinia state 清空了（内存释放）
+    └── checkAuth() 从 localStorage 读回来 → 恢复到 state
+```
+
+- 只存 state → 刷新就丢，每次都要重新登录
+- 只存 localStorage → 能用，但其他组件通过 store 读不到，失去响应式
+- **两个都存 → 最佳体验**
+
+## 16.6 login 方法流程
+
+```
+login(username, password)
+    │
+    ▼
+调用 axios.post('/auth/login', { username, password })
+    │
+    ├── 成功 → 拿到 { token }
+    │     ├── this.token = token              // 存 Pinia
+    │     ├── localStorage.setItem('token', token)  // 存硬盘
+    │     ├── this.user = { username, role }        // 从 token 解码
+    │     └── 返回 true（调用方知道登录成功）
+    │
+    └── 失败 → 返回 false（调用方显示错误提示）
+```
+
+## 16.7 logout 方法流程
+
+```
+logout()
+    ├── this.token = null
+    ├── this.user = null
+    ├── localStorage.removeItem('token')
+    └── router.push('/login')
+```
+
+## 16.8 user 信息获取方案
+
+登录接口 `/api/auth/login` 目前只返回 `{ token }`，但 token 的 JWT payload 里已包含 username 和 role（后端 `GenerateJWT` 写入的）。
+
+**推荐方案：前端直接从 JWT 解码**
+
+```ts
+// JWT 是三段式: header.payload.signature，base64 编码
+// payload 形如: { username: "admin", role: "admin", exp: 1234567890 }
+
+function decodeToken(token: string) {
+  const payloadBase64 = token.split('.')[1]  // 取中间那段
+  const payloadJson = atob(payloadBase64)     // base64 解码
+  return JSON.parse(payloadJson)              // JSON 解析
+  // → { username: "admin", role: "admin", exp: 1234567890 }
+}
+```
+
+| 方案 | 做法 | 评价 |
+|------|------|------|
+| A | 后端多返回 username/role | 简单但要多改一个地方 |
+| B | 前端解码 JWT payload | ⭐ 推荐，零额外请求，不改后端 |
+| C | 单独 /api/user/me 接口 | 小项目杀鸡用牛刀 |
+
+### 16.8.1 decodeToken 详解：为什么需要它？
+
+**一句话：** 后端登录接口只返回 `{ token }`，没返回 username 和 role。但前端需要知道"谁登录了"和"是不是管理员"——这些信息就藏在 token 的 Payload 里。
+
+#### JWT 三段式结构
+
+JWT 长这样，三个部分用 `.` 分开：
+
+```
+Header.Payload.Signature
+```
+
+实际一段 token：
+
+```
+eyJhbGciOiJIUzI1NiJ9.eyJ1c2VybmFtZSI6ImFuZ2VsaGVhcnQiLCJyb2xlIjoiYWRtaW4iLCJleHAiOjE3NDg3MjQ4MDB9.s4X9_8kL...
+│                      │                                                                  │
+│  Header（算法）        │  Payload（数据载荷）                                              │  Signature（签名）
+│  base64(               │  base64(                                                        │  防篡改校验
+│  {"alg":"HS256"}       │  {"username":"angelheart","role":"admin","exp":1748724800"}      │
+│  )                     │  )                                                              │
+```
+
+**三段 base64 JSON，不是加密，只是编码。** 所以前端可以直接解码 Payload 读出内容——不需要密钥，不需要调后端。
+
+#### decodeToken 做了什么
+
+```
+token.split('.')[1]   →  取中间那段 base64 字符串
+atob(...)             →  base64 解码为 JSON 字符串
+JSON.parse(...)       →  转为 JS 对象 { username, role }
+```
+
+就是三步纯计算，零网络请求。
+
+#### 它在 store 的两处调用
+
+```ts
+// ① login 成功后 —— 解码 token 拿到用户信息
+const res = await axios.post('/auth/login', { username, password })
+const payload = decodeToken(res.data.token)
+if (payload) user.value = { username: payload.username, role: payload.role }
+
+// ② 刷新页面恢复时 —— 从 localStorage 读回 token，解码恢复用户信息
+function checkAuth() {
+  const savedToken = localStorage.getItem('token')
+  const payload = decodeToken(savedToken)
+  if (payload) user.value = { username: payload.username, role: payload.role }
+}
+```
+
+#### 完整实现（实际代码）
+
+```ts
+function decodeToken(tokenStr: string): { username: string; role: string } | null {
+  try {
+    const parts = tokenStr.split('.')
+    if (!parts[1]) return null       // 防止非 JWT 格式的字符串
+    const payloadJson = atob(parts[1])
+    return JSON.parse(payloadJson)
+  } catch {
+    return null                      // 解码失败 → 当做无效 token
+  }
+}
+```
+
+**本质：token 就是一张"自编码的用户名片"，decodeToken 把名片展开读出姓名和身份，省得再跑一趟后台去问。**
+
+## 16.9 Auth Store 伪代码骨架
+
+```ts
+import { defineStore } from 'pinia'
+import axios from '@/axios'
+
+export const useAuthStore = defineStore('auth', {
+  state: () => ({
+    token: null as string | null,
+    user: null as { username: string; role: string } | null,
+  }),
+
+  getters: {
+    isLoggedIn: (state) => !!state.token,
+    isAdmin: (state) => state.user?.role === 'admin',
+  },
+
+  actions: {
+    async login(username: string, password: string) {
+      // 1. 调登录 API
+      // 2. 拿到 token → 解码 user → 存 state + localStorage
+      // 3. 返回成功/失败
+    },
+
+    logout() {
+      // 1. 清 state
+      // 2. 清 localStorage
+      // 3. 跳转 /login
+    },
+
+    checkAuth() {
+      // 1. 从 localStorage 读 token
+      // 2. 有 → 恢复到 state
+      // 3. 无 → 跳过
+    },
+  },
+})
+```
+
+## 16.10 第一步完整清单
+
+| 文件 | 要做什么 |
+|------|----------|
+| `stores/auth.ts` | 按 16.9 骨架实现 login / logout / checkAuth |
+| `App.vue` | 补 `<RouterView />`；el-menu 点击时 `router.push` 跳转；el-menu 高亮同步当前路由 |
+| `router/index.ts` | 加 `beforeEach` 守卫（未登录 → /login，已登录访问 /login → /home） |
+
+第一步做完后效果：访问任意页面 → 自动跳到 `/login` → Login 组件渲染（虽然还是空壳）→ 数据链路打通。
+
+---
+
+# 17. 2026-05-30 前端基础设施实施
+
+## 17.1 实施清单
+
+| # | 文件 | 动作 | 说明 |
+|---|------|------|------|
+| 1 | `stores/auth.ts` | 实现 | login / logout / checkAuth + decodeToken + token 双重存储 |
+| 2 | `router/index.ts` | 重写 | 路由嵌套结构 + beforeEach 守卫 |
+| 3 | `views/DefaultLayout.vue` | **新建** | 导航栏 + footer + `<RouterView />`，从 App.vue 中抽出 |
+| 4 | `App.vue` | 精简 | 只剩 `<RouterView />`，纯路由容器 |
+| 5 | `axios.ts` | 补全 | 请求拦截器（加 token）+ 响应拦截器（401 处理）+ export |
+| 6 | `.prettierrc` | **新建** | Prettier 格式化规则 |
+| 7 | `.prettierignore` | **新建** | 忽略 node_modules、dist |
+| 8 | `.vscode/settings.json` | 追加 | formatOnSave + defaultFormatter |
+| 9 | `README.md` | 更新 | 项目结构、技术栈、开发说明 |
+| 10 | `stores/counter.ts` | 删除 | 脚手架示例，不再需要 |
+
+## 17.2 最终页面层级
+
+```
+App.vue（<RouterView />）
+  ├── /login           → Login.vue（纯登录表单，无导航栏无footer）
+  └── /（DefaultLayout）
+        ├── /home      → Home.vue（导航栏 + 内容 + footer）
+        ├── /card      → Card.vue
+        └── /giftbooks → GiftBooks.vue
+```
+
+## 17.3 DefaultLayout.vue 关键逻辑
+
+- `el-menu` 使用 `router.push({ name: key })` 做导航跳转（key 即路由 name）
+- `watch(() => route.name)` 监听 URL 变化，同步菜单高亮
+- 不再包含"登录"菜单项（登录页独立，不在导航里）
+
+## 17.4 路由守卫最终逻辑
+
+```
+beforeEach(to, from, next):
+  token = localStorage.getItem('token')
+
+  ① to.meta.requiresAuth !== true
+     ├── token && to.path === '/login' → next('/home')  // 已登录别再看登录页
+     └── 否则 → next()                                   // 放行
+
+  ② to.meta.requiresAuth === true && !token
+     → next({ path: '/login', query: { redirect: to.fullPath } })  // 没 token → 登录
+
+  ③ to.meta.requiresAuth === true && token
+     → next()  // 有 token → 放行
+```
+
+## 17.5 Auth Store 结构
+
+```ts
+useAuthStore() {
+  state:    token, user
+  getters:  isLoggedIn, isAdmin
+  actions:  login(), logout(), checkAuth()
+  工具:     decodeToken()  // JWT payload 解码，零网络请求
+}
+```
+
+**token 双重存储：** Pinia state（响应式、当前页可用）+ localStorage（刷新不丢）
+
+## 17.6 当前缺口（下一步）
+
+| 文件 | 状态 | 说明 |
+|------|------|------|
+| `axios.ts` | ✅ | 请求 + 响应拦截器 |
+| `stores/auth.ts` | ✅ | login/logout/checkAuth |
+| `router/index.ts` | ✅ | 嵌套路由 + 守卫 |
+| `App.vue` | ✅ | 纯容器 |
+| `DefaultLayout.vue` | ✅ | 导航栏布局 |
+| `components/Login.vue` | ❌ | 空壳，待写登录表单 |
+| `views/Home.vue` | ⚠️ | 占位，待填充 |
+| `views/Card.vue` | ⚠️ | 占位，待填充 |
+| `views/GiftBooks.vue` | ⚠️ | 占位，待填充 |
+
+下一步：写 `Login.vue` 登录表单，打通登录全链路。
+
+---
+
+# 18. Vite 代理配置
+
+## 18.1 为什么需要代理
+
+当前 axios baseURL 直接指向后端：`http://localhost:8080/api`，浏览器跨域请求后端。配代理后：
+
+```
+之前：浏览器 → http://localhost:8080/api/xxx  （跨域，CORS 问题）
+之后：浏览器 → http://localhost:5173/api/xxx   （同源，无跨域）
+                │
+                └── Vite 自动转发 → http://localhost:8080/api/xxx
+```
+
+**好处：**
+- 不需要后端配 CORS
+- axios baseURL 简化为 `/api`，更接近生产环境
+- 开发和生产环境请求路径统一
+
+## 18.2 vite.config.ts 配置
+
+```ts
+import { defineConfig } from 'vite'
+// ...其他 import
+
+export default defineConfig({
+  plugins: [vue(), vueDevTools()],
+  resolve: {
+    alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) },
+  },
+  server: {
+    proxy: {
+      '/api': {
+        target: 'http://localhost:8080',
+        changeOrigin: true,
+      },
+    },
+  },
+})
+```
+
+| 配置项 | 含义 |
+|--------|------|
+| `'/api'` | 匹配所有以 `/api` 开头的请求路径 |
+| `target` | 转发到后端的目标地址 |
+| `changeOrigin` | 修改请求头 Origin 为 target，避免后端校验 Origin 导致拒绝 |
+
+## 18.3 配完后 axios.ts 需同步修改
+
+```ts
+// 之前（直连后端）
+const instance = axios.create({
+  baseURL: 'http://localhost:8080/api',
+})
+
+// 之后（走代理）
+const instance = axios.create({
+  baseURL: '/api',
+})
+```
+
+## 18.4 请求路径对照
+
+| 前端代码 | 浏览器发出 | Vite 转发到 |
+|---------|-----------|------------|
+| `axios.post('/auth/login')` | `localhost:5173/api/auth/login` | `localhost:8080/api/auth/login` |
+| `axios.get('/giftbooks')` | `localhost:5173/api/giftbooks` | `localhost:8080/api/giftbooks` |
+
+## 18.5 注意事项
+
+- **仅开发环境生效**：`server.proxy` 只在 `npm run dev` 时工作，生产构建 `npm run build` 不包含代理
+- **修改 vite.config.ts 后要重启**：Vite 不会热更新自身配置，需要 `Ctrl+C` 停掉再 `npm run dev`
+- **生产环境**：部署时通常用 Nginx 做反向代理，配置逻辑类似

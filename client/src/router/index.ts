@@ -1,40 +1,70 @@
 import { createRouter, createWebHistory } from 'vue-router'
 
-
 const routes = [
+  // 登录页 —— 顶级路由，不套导航栏
   {
-    path:"/",
-    redirect:"/home"
+    path: '/login',
+    name: 'login',
+    component: () => import('../components/Login.vue'),
+    meta: { requiresAuth: false },
+  },
 
-  },
+  // 需要导航栏的页面 —— 嵌套在 DefaultLayout 下
   {
-    path:"/login",
-    name:"Login",
-    component:()=>import("../components/Login.vue")
+    path: '/',
+    component: () => import('../views/DefaultLayout.vue'),
+    redirect: '/home',
+    children: [
+      {
+        path: 'home',
+        name: 'home',
+        component: () => import('../views/Home.vue'),
+        meta: { requiresAuth: true },
+      },
+      {
+        path: 'card',
+        name: 'card',
+        component: () => import('../views/Card.vue'),
+        meta: { requiresAuth: true },
+      },
+      {
+        path: 'giftbooks',
+        name: 'giftbooks',
+        component: () => import('../views/GiftBooks.vue'),
+        meta: { requiresAuth: true },
+      },
+    ],
   },
-  {
-    path:"/home",
-    name:"Home",
-    component:()=>import("../views/Home.vue")
-  },
-  {
-    path:"/card",
-    name:"Card",
-    component:()=>import("../views/Card.vue")
-  },
-  {
-    path:"/giftbooks",
-    name:"GiftBooks",
-    component:()=>import("../views/GiftBooks.vue")
-  }
 ]
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
-  routes: routes
+  routes,
 })
 
+// 路由守卫：未登录用户访问受保护的路由时，重定向到登录页
+router.beforeEach((to, from, next) => {
+  const token = localStorage.getItem('token')
 
+  // 目标页面不需要登录，直接放行
+  if (to.meta.requiresAuth !== true) {
+    // 已登录用户访问 /login → 跳首页
+    if (token && to.path === '/login') {
+      next('/home')
+      return
+    }
+    next()
+    return
+  }
 
+  // 目标页面需要登录，但没有 token，重定向到登录页
+  if (!token) {
+    next({ path: '/login', query: { redirect: to.fullPath } })
+    return
+  }
+
+  // 目标页面需要登录，且有 token，放行
+  next()
+})
 
 export default router

@@ -1,7 +1,7 @@
 import axios from 'axios'
 
 const instance = axios.create({
-    baseURL:'http://localhost:8080/api',
+    baseURL:'/api',
 })
 // 添加请求拦截器
 instance.interceptors.request.use(config=>{
@@ -16,7 +16,10 @@ instance.interceptors.request.use(config=>{
 instance.interceptors.response.use((response)=>response,(error)=>{
     if(error.response?.status ===401){
         localStorage.removeItem(`token`)
+        if(window.location.pathname !== '/login'){
         window.location.href = '/login'
+        }
+
     }
     return Promise.reject(error)
 
