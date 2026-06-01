@@ -2022,3 +2022,460 @@ Vue 中 `:` 是 `v-bind` 的缩写，不加 `:` 的属性值永远是字符串�
 2. 实现 GiftBookDetailView（点击行跳转详情，展示记录列表）
 3. 完成 Avatar 头像区域
 4. 补充 Home.vue 首页内容
+
+---
+
+# 21. 2026-05-31：GiftBooks 卡片网格重构方案
+
+## 21.1 需求变更
+
+原计划用 `el-table` 展示礼薄列表，改为**卡片网格布局**。
+
+**效果：** 每个礼薄一张卡片，从左往右排列，超出宽度自动换行。点击卡片跳转详情页。
+
+## 21.2 卡片 vs 表格对比
+
+| 维度 | el-table | 卡片网格 |
+|------|----------|---------|
+| 信息密度 | 高，行式排列 | 中等，每张卡片独立 |
+| 视觉友好 | 偏表格，数据感强 | 偏展示，浏览感好 |
+| 移动端 | 需要横向滚动 | 自动换行，适配更好 |
+| 点击区域 | 一整行 | 一整张卡片 |
+| 适合场景 | 多列数据对比 | 内容预览 + 点击深入 |
+
+礼薄场景（每个礼薄是一个独立实体，不是用来逐行对比的）更适合卡片。
+
+## 21.3 整体布局
+
+```
+┌────────────────────────────────────────────────┐
+│  [+ 新建礼薄]                                    │
+│                                                │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐     │
+│  │ 婚礼      │  │ 满月酒    │  │ 生日宴    │     │
+│  │ 2026-05-31│  │ 2026-04-15│  │ 2026-03-20│     │
+│  │ 来 →      │  │ 去 ←      │  │ 来 →      │     │
+│  └──────────┘  └──────────┘  └──────────┘     │
+│  ┌──────────┐  ┌──────────┐                   │
+│  │ 升学宴    │  │ 乔迁      │                   │
+│  │ ...       │  │ ...       │                   │
+│  └──────────┘  └──────────┘                   │
+│                                                │
+└────────────────────────────────────────────────┘
+```
+
+## 21.4 模板结构
+
+```html
+<template>
+  <div class="giftbooks">
+    <!-- 顶部操作栏 -->
+    <div class="giftbooks-header">
+      <h2>礼薄</h2>
+      <el-button type="primary" @click="openCreateDialog">新建礼薄</el-button>
+    </div>
+
+    <!-- 卡片网格 -->
+    <div class="card-grid" v-loading="loading">
+      <el-card
+        v-for="book in giftBooks"
+        :key="book.ID"
+        class="giftbook-card"
+        shadow="hover"
+        @click="router.push(`/giftbooks/${book.ID}`)"
+      >
+        <template #header>
+          <div class="card-header">
+            <span class="event-name">{{ book.event_name }}</span>
+            <el-tag
+              :type="book.direction === '来' ? 'success' : 'warning'"
+              size="small"
+            >
+              {{ book.direction }}
+            </el-tag>
+          </div>
+        </template>
+        <div class="card-body">
+          <div class="card-date">
+            <el-icon><Calendar /></el-icon>
+            {{ formatDate(book.event_date) }}
+          </div>
+          <div class="card-creator">
+            创建者：{{ book.created_by }}
+          </div>
+        </div>
+      </el-card>
+
+      <!-- 空状态 -->
+      <el-empty v-if="!loading && giftBooks.length === 0" description="暂无礼薄" />
+    </div>
+
+    <!-- 新建/编辑弹窗（复用原有 el-dialog） -->
+    <el-dialog v-model="dialogVisible" ...>
+      <!-- 原有表单 -->
+    </el-dialog>
+  </div>
+</template>
+```
+
+## 21.5 脚本逻辑
+
+```ts
+import { ref, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
+import axios from '../axios'
+import { ElMessage } from 'element-plus'
+
+const router = useRouter()
+
+// --- 列表数据 ---
+const giftBooks = ref([])
+const loading = ref(false)
+
+const fetchGiftBooks = async () => {
+  loading.value = true
+  try {
+    const res = await axios.get('/giftbooks')
+    giftBooks.value = res.data.giftbooks ?? []
+  } catch (err: any) {
+    ElMessage.error('获取礼薄列表失败')
+  } finally {
+    loading.value = false
+  }
+}
+
+onMounted(() => {
+  fetchGiftBooks()
+})
+
+// --- 日期格式化 ---
+// 后端 time.Time → JSON 是 ISO 8601: "2026-05-31T00:00:00+08:00"
+// 截取 T 之前的部分即可得到 YYYY-MM-DD
+const formatDate = (iso: string): string => {
+  if (!iso) return ''
+  return iso.split('T')[0]
+}
+
+// --- 新建礼薄（成功后刷新列表） ---
+const createGiftBook = async () => {
+  try {
+    await axios.post('/admin/giftbook', form.value)
+    ElMessage.success('创建成功')
+    dialogVisible.value = false
+    fetchGiftBooks()  // ← 关键：创建后刷新
+  } catch (err: any) {
+    const msg = err.response?.data?.error || '创建失败'
+    ElMessage.error(msg)
+  }
+}
+```
+
+## 21.6 样式设计
+
+```css
+.giftbooks {
+  padding: 20px;
+}
+
+/* 顶部操作栏 */
+.giftbooks-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 24px;
+}
+
+/* 卡片网格 —— 核心布局 */
+.card-grid {
+  display: flex;
+  flex-wrap: wrap;          /* 超出宽度自动换行 */
+  gap: 16px;                /* 卡片之间间距 */
+}
+
+/* 单张卡片 */
+.giftbook-card {
+  width: 240px;             /* 固定宽度，一排能放多个 */
+  cursor: pointer;          /* 鼠标变手型，暗示可点击 */
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.giftbook-card:hover {
+  transform: translateY(-4px);   /* 悬浮上移 4px */
+}
+
+/* 卡片头部：事件名 + 方向标签 */
+.card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.event-name {
+  font-size: 16px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 卡片内容 */
+.card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  color: #666;
+  font-size: 14px;
+}
+```
+
+## 21.7 Flexbox 换行原理
+
+```
+display: flex + flex-wrap: wrap
+
+  一行放 5 张卡片（240px × 5 + 16px × 4 = 1264px）
+  ┌────┐ ┌────┐ ┌────┐ ┌────┐ ┌────┐
+  │ 1  │ │ 2  │ │ 3  │ │ 4  │ │ 5  │
+  └────┘ └────┘ └────┘ └────┘ └────┘
+
+  屏幕变窄（900px）→ 第 4 张放不下 → 自动换到下一行
+  ┌────┐ ┌────┐ ┌────┐
+  │ 1  │ │ 2  │ │ 3  │
+  └────┘ └────┘ └────┘
+  ┌────┐ ┌────┐
+  │ 4  │ │ 5  │
+  └────┘ └────┘
+```
+
+`gap: 16px` 同时控制横向和纵向间距，不需要手动设 margin。
+
+## 21.8 改动清单
+
+| # | 位置 | 改动内容 |
+|---|------|---------|
+| 1 | `<script>` | 新增 `giftBooks`、`loading`、`fetchGiftBooks`、`formatDate`；`onMounted` 调用 `fetchGiftBooks`；引入 `useRouter` |
+| 2 | `<template>` | 去掉 `<el-header>` 和 `<el-main>`；换成 `.giftbooks-header` + `.card-grid` + `el-card` + `v-for` |
+| 3 | `<style>` | 新增 `.card-grid`、`.giftbook-card`、`.card-header` 等样式 |
+| 4 | `createGiftBook` | 成功后加一行 `fetchGiftBooks()` |
+| 5 | 删除 | 去掉 `import GiftRecords from '../components/GiftRecords.vue'`（未使用的引用） |
+| 6 | `router/index.ts` | 预留 `/giftbooks/:id` 路由（第二步做详情页时需要） |
+
+## 21.9 设计要点总结
+
+| 要点 | 说明 |
+|------|------|
+| **flex-wrap** | 核心换行机制，不用 media query 就能自适应 |
+| **固定卡片宽度** | `width: 240px` 而不是百分比，保证每行卡片数量随容器宽度自然变化 |
+| **hover 上移** | `translateY(-4px)` + `shadow="hover"`，视觉反馈明确 |
+| **日期截取** | `iso.split('T')[0]`，不引入 dayjs 依赖，够用 |
+| **创建后刷新** | `fetchGiftBooks()` 重拉列表，保证数据一致 |
+| **click 跳转** | `router.push()` 到详情页，预留路由即可 |
+
+---
+
+# 22. 2026-06-01：礼薄卡片列表完善方案
+
+## 22.1 当前代码状态
+
+文件关系：
+
+```
+GiftBooks.vue（父组件）
+  ├── el-dialog（新建礼薄弹窗）
+  │     ├── el-input（事件名）
+  │     ├── el-radio-group（方向：来/去）
+  │     └── el-date-picker（日期）
+  └── <Books />（子组件 — 卡片网格）
+
+Books.vue（子组件）
+  ├── CSS Grid 卡片网格（300px 最小列宽，auto-fill）
+  ├── el-card × N（v-for="book in giftbooks"）
+  │     ├── el-dropdown（操作菜单：编辑/删除）
+  │     └── 卡片内容（图片、创建者、时间）
+  └── script：fetchGiftBooks / formatDate / confirmDelete / deletebook
+```
+
+## 22.2 改动点拆解
+
+### 改动 1：创建成功后刷新列表
+
+**问题：** `GiftBooks.vue` 的 `createGiftBook` 成功后只关弹窗，不刷新子组件 Books 的列表。
+
+**方案：父组件通过 ref 调用子组件暴露的方法**
+
+```
+GiftBooks.vue（父）                    Books.vue（子）
+─────────────────                    ──────────────
+<Books ref="booksRef" />              defineExpose({ fetchGiftBooks })
+
+const booksRef = ref<InstanceType
+  <typeof Books>>()
+
+createGiftBook 成功后
+  → booksRef.value.fetchGiftBooks()  →  重新请求 GET /giftbooks
+```
+
+原理：
+- 子组件用 `defineExpose` 把内部方法暴露出去
+- 父组件用 `ref` 拿到子组件实例
+- 父组件调用 `childRef.value.xxx()` 触发子组件行为
+
+**改动文件：**
+- `Books.vue`：script 末尾加 `defineExpose({ fetchGiftBooks })`
+- `GiftBooks.vue`：`<Books ref="booksRef" />` + 创建成功后 `booksRef.value.fetchGiftBooks()`
+
+### 改动 2：编辑弹窗
+
+**问题：** Books.vue 下拉菜单的「编辑」选项没有绑定事件处理。
+
+**需要新增的内容：**
+
+```
+┌─────────────────────────────────────────┐
+│  Books.vue 新增：                        │
+│                                         │
+│  ① 编辑弹窗（el-dialog + el-form）       │
+│     - 事件名 input                      │
+│     - 方向 radio-group                  │
+│     - 日期 date-picker                  │
+│     - 确定 / 取消 按钮                   │
+│                                         │
+│  ② 编辑相关的响应式数据                  │
+│     - editDialogVisible: ref(false)     │
+│     - editForm: ref({...})  当前编辑的卡片数据 │
+│     - editingBookId: ref(null)  正在编辑的礼薄ID │
+│                                         │
+│  ③ 三个函数                             │
+│     - openEditDialog(book)  打开弹窗+预填数据 │
+│     - submitEdit()  调 POST /admin/giftbook/edit/:id │
+│     - 成功后刷新列表 + 关弹窗             │
+└─────────────────────────────────────────┘
+```
+
+**交互流程：**
+
+```
+点击「编辑」
+  → openEditDialog(book)
+    ├── editingBookId = book.ID
+    ├── editForm = { event_name, direction, event_date }  // 预填当前值
+    └── editDialogVisible = true
+
+用户修改 → 点「确定」
+  → submitEdit()
+    → axios.post(`/admin/giftbook/edit/${editingBookId}`, editForm)
+    → 成功：ElMessage.success + 关弹窗 + fetchGiftBooks()
+    → 失败：ElMessage.error
+
+点「取消」/ ESC / 点遮罩
+  → editDialogVisible = false（v-model 自动）
+```
+
+**后端接口：** `POST /admin/giftbook/edit/:id`（已在 router 中定义，调 `UpdateGiftBook`）
+
+**与新建弹窗的关系：** 编辑和新建是**两个独立的 el-dialog**，不是复用的。原因：
+- 新建的 form 初始值为空；编辑需要预填当前值
+- 新建提交 `POST /admin/giftbook`；编辑提交 `POST /admin/giftbook/edit/:id`
+- 复用会增加复杂度（需要判断"当前是新建还是编辑"），不如分开清晰
+
+### 改动 3：卡片点击跳转详情页
+
+**问题：** 点卡片没有跳转到详情页。
+
+**方案：** 卡片绑 `@click` + 路由跳转
+
+```html
+<el-card @click="goDetail(book.ID)">
+  ...
+  <el-dropdown @click.stop>   <!-- .stop 阻止冒泡，点三点不触发卡片跳转 -->
+```
+
+`@click.stop` 的作用：
+```
+用户点三个点图标
+    │
+    ▼
+事件冒泡：dropdown 的 click → 卡片的 click
+    │                              │
+    └── @click.stop 阻断 ──→ ✗ 被阻止，不触发 goDetail
+```
+
+**路由变更：** 需要在 `router/index.ts` 新增详情页路由：
+
+```ts
+{
+  path: 'giftbooks/:id',
+  name: 'giftbook-detail',
+  component: () => import('../views/GiftBookDetail.vue'),
+  meta: { requiresAuth: true, hidden: true },
+}
+```
+
+`hidden: true` 表示不在导航菜单中显示（详情页不是独立入口，只能从卡片点击进入）。
+
+详情页组件 `GiftBookDetail.vue` 可以先创建为占位组件，后续再填充内容。
+
+### 改动 4：小修小补
+
+| 问题 | 当前代码 | 修复 |
+|------|---------|------|
+| `:key` 绑定对象 | `:key="book"` | `:key="book.ID"` — key 应该是唯一标识符，不是整个对象 |
+| 方向值不一致 | `el-radio value="去"` | 后端默认值是 `"来"`，数据库定义 `default:来`。但目前后端没有校验，"来"/"往" 和 "来"/"去" 混用可能出问题。确认后端 direction 字段用 "来"/"往" 还是 "来"/"去" |
+
+> **方向值约定：** 统一使用 "来"/"去"。GiftBooks.vue 的 radio 已用 "来"/"去"，与后端保持一致即可。
+
+## 22.3 改动文件清单
+
+| # | 文件 | 改动 |
+|---|------|------|
+| 1 | `Books.vue` | ① 加编辑弹窗（el-dialog + el-form）② `defineExpose({ fetchGiftBooks })` ③ `@click="goDetail(book.ID)"` + `@click.stop` ④ `:key="book.ID"` |
+| 2 | `GiftBooks.vue` | ① `<Books ref="booksRef" />` ② `booksRef.value.fetchGiftBooks()` ③ 统一方向值为 "来"/"往" |
+| 3 | `router/index.ts` | 新增 `/giftbooks/:id` 路由 |
+| 4 | `views/GiftBookDetail.vue` | **新建** — 占位组件（第二步完善） |
+
+## 22.4 数据流图
+
+```
+用户操作                     组件                     后端 API
+─────────                  ────────                  ────────
+［新建礼薄］
+  填表单 → 点新建 → GiftBooks.createGiftBook() → POST /admin/giftbook
+                        ↓ 成功
+                   booksRef.fetchGiftBooks()  → GET /giftbooks → 刷新列表
+
+［编辑礼薄］
+  点编辑 → Books.openEditDialog()（预填数据）
+  改表单 → 点确定 → Books.submitEdit() → POST /admin/giftbook/edit/:id
+                        ↓ 成功
+                   fetchGiftBooks() → GET /giftbooks → 刷新列表
+
+［删除礼薄］
+  点删除 → ElMessageBox.confirm（二次确认）
+  点确定 → Books.deletebook() → POST /admin/giftbook/:id
+                        ↓ 成功
+                   fetchGiftBooks() → GET /giftbooks → 刷新列表
+
+［查看详情］
+  点卡片 → router.push('/giftbooks/:id') → 渲染 GiftBookDetail.vue
+```
+
+## 22.5 defineExpose 原理
+
+Vue 3 的 `<script setup>` 组件默认是**封闭**的——父组件通过 `ref` 拿不到子组件内部定义的变量和方法。这是一种安全设计。
+
+`defineExpose` 是 `<script setup>` 的编译宏，用于**显式暴露**内部成员给父组件：
+
+```ts
+// 子组件 Books.vue
+const fetchGiftBooks = async () => { ... }
+defineExpose({ fetchGiftBooks })  // 「我只暴露这个方法，其他都是私有的」
+```
+
+```ts
+// 父组件 GiftBooks.vue
+const booksRef = ref<InstanceType<typeof Books>>()
+booksRef.value?.fetchGiftBooks()  // OK，这个被暴露了
+booksRef.value?.deletebook()      // ❌ 没暴露，TS 报错
+```
+
+**没有 defineExpose 的世界：** 只能靠事件（emit）或全局状态（Pinia）通信。对于"父调子方法"这种场景，defineExpose 是最直接的方式。

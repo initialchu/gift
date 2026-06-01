@@ -66,4 +66,7 @@ watch(
 .avatar{
   margin-right: 20px;
 }
+body {
+  padding-right: 0 !important;
+}
 </style>

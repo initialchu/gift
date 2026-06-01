@@ -26,9 +26,10 @@
         <el-button type="primary" @click="createGiftBook">新建</el-button>
       </el-form>
       </el-dialog>
-    <el-main>
-      
-    </el-main>
+     <!-- 卡片网格 -->
+    <div class="books">
+    <Books ref="booksRef" />
+      </div>
   </div>
 </template>
 
@@ -36,7 +37,7 @@
 
 import {ref} from 'vue'
 import axios from '../axios'
-import GiftRecords from '../components/GiftRecords.vue'
+import Books from '../components/Books.vue'
 import { ElMessage } from 'element-plus'
 const dialogVisible = ref(false)
 const form = ref({
@@ -44,19 +45,21 @@ const form = ref({
  event_date:'',
   direction:'来',
 })
+// 子组件 Books 的 ref，用于创建成功后刷新列表
+const booksRef = ref<InstanceType<typeof Books>>()
 
 // 这里是新增礼薄的函数
- const  createGiftBook = async () =>{
-  try{
-    await axios.post('/admin/giftbook',form.value)
+const createGiftBook = async () => {
+  try {
+    await axios.post('/admin/giftbook', form.value)
     ElMessage.success('创建成功')
     dialogVisible.value = false
-  }catch(err:any){
+    booksRef.value?.fetchGiftBooks()
+  } catch (err: any) {
     const msg = err.response?.data?.error || '创建失败'
     ElMessage.error(msg)
   }
 }
-
 
 </script>
 <style scoped>
@@ -65,5 +68,12 @@ const form = ref({
     justify-content:space-between;
     align-items:center;
     height:60px;
+}
+.books{
+    padding:20px;
+    height:calc(100vh - 60px - 40px);
+    overflow-y:auto;
+    width:100%;
+    
 }
 </style>

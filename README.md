@@ -67,12 +67,16 @@ gift/
 │   │   ├── stores/
 │   │   │   └── auth.ts          # 登录态 Pinia store（token 双重存储 + JWT 解码）
 │   │   ├── components/
-│   │   │   └── Login.vue        # 登录表单（Element Plus 卡片表单）
+│   │   │   ├── Login.vue        # 登录表单（Element Plus 卡片表单）
+│   │   │   ├── Books.vue        # 礼薄卡片网格（CSS Grid + 新建/编辑/删除 + 跳转详情）
+│   │   │   ├── Avatar.vue       # 头像下拉菜单（退出登录）
+│   │   │   └── GiftRecords.vue  # 礼金记录组件（待完善）
 │   │   └── views/
-│   │       ├── DefaultLayout.vue # 导航栏布局（el-menu + RouterView + footer）
+│   │       ├── DefaultLayout.vue # 导航栏布局（el-menu + Avatar + RouterView + footer）
 │   │       ├── Home.vue         # 首页（占位）
 │   │       ├── Card.vue         # 人情卡片（占位）
-│   │       └── GiftBooks.vue    # 礼薄列表（占位）
+│   │       ├── GiftBooks.vue    # 礼薄列表页（新建弹窗 + Books 子组件）
+│   │       └── GiftBookDetail.vue # 礼薄详情页（基本信息 + 记录列表预留）
 │   ├── .prettierrc              # Prettier 格式化规则
 │   ├── .prettierignore          # Prettier 忽略目录
 │   ├── index.html

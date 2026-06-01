@@ -33,6 +33,12 @@ const routes = [
         component: () => import('../views/GiftBooks.vue'),
         meta: { requiresAuth: true },
       },
+      {
+        path: 'giftbooks/:id',
+        name: 'giftbook-detail',
+        component: () => import('../views/GiftBookDetail.vue'),
+        meta: { requiresAuth: true, hidden: true },
+      },
     ],
   },
 ]
