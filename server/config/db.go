@@ -72,4 +72,39 @@ func Autotable() {
 	if err := global.DB.AutoMigrate(&giftrecords); err != nil {
 		log.Fatalf("自动迁移数据库失败: %v", err)
 	}
+	var cards models.Card
+	if err := global.DB.AutoMigrate(&cards); err != nil {
+		log.Fatalf("自动迁移数据库失败: %v", err)
+	}
+}
+
+// MigrateCards 将现有 gift_records 按 person_name 归集为卡片，回填 card_id
+// 只执行一次：card_id = 0 的记录视为未迁移
+func MigrateCards() {
+	var count int64
+	global.DB.Model(&models.GiftRecord{}).Where("card_id = 0").Count(&count)
+	if count == 0 {
+		return
+	}
+	log.Printf("开始数据迁移：%d 条记录需要关联卡片...", count)
+
+	// ① 去重人名 → 建卡片
+	var names []string
+	global.DB.Model(&models.GiftRecord{}).
+		Select("DISTINCT person_name").
+		Where("card_id = 0").
+		Pluck("person_name", &names)
+
+	for _, name := range names {
+		global.DB.Create(&models.Card{PersonName: name})
+	}
+	log.Printf("已创建 %d 张卡片", len(names))
+
+	// ② 回填 card_id：按 person_name 匹配
+	global.DB.Exec(`
+		UPDATE gift_records
+		SET card_id = (SELECT id FROM cards WHERE cards.person_name = gift_records.person_name)
+		WHERE card_id = 0
+	`)
+	log.Printf("迁移完成")
 }

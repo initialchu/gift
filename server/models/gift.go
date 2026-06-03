@@ -22,6 +22,7 @@ type GiftBook struct {
 type GiftRecord struct {
 	gorm.Model
 	GiftBookID uint    `gorm:"not null;index" json:"gift_book_id"`
+	CardID     uint    `gorm:"index" json:"card_id"`
 	PersonName string  `gorm:"type:varchar(64);not null" json:"person_name"`
 	Amount     float64 `gorm:"type:decimal(10,2);not null" json:"amount"`
 	Address    string  `gorm:"type:varchar(255)" json:"address,omitempty"`

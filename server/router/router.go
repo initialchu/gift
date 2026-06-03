@@ -23,6 +23,10 @@ func SetupRouter() *gin.Engine {
 		api.GET("/giftbook/:id", controllers.GetgiftBookbyID)
 		//获取指定礼薄的礼金记录列表接口
 		api.GET("/giftrecord/:id/records", controllers.GetGiftRecordsbyID)
+		// 获取人情卡片汇总列表
+		api.GET("/cards", controllers.GetCards)
+		// 获取某张卡片的往来明细
+		api.GET("/cards/detail", controllers.GetCardDetail)
 	}
 
 	admin := r.Group("/api/admin")

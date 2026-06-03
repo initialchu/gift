@@ -18,6 +18,21 @@ func AddGift(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+
+	// 处理卡片关联：如果传了 card_id 就用，否则按 person_name 查找或创建卡片
+	if giftRecord.CardID == 0 {
+		var card models.Card
+		global.DB.Where("person_name = ?", giftRecord.PersonName).First(&card)
+		if card.ID == 0 {
+			card.PersonName = giftRecord.PersonName
+			if err := global.DB.Create(&card).Error; err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "创建卡片失败"})
+				return
+			}
+		}
+		giftRecord.CardID = card.ID
+	}
+
 	// 验证关联的礼薄是否存在
 	var giftbook models.GiftBook
 
@@ -143,6 +158,7 @@ func UpdateGift(c *gin.Context) {
 		"amount":      giftRecord.Amount,
 		"address":     giftRecord.Address,
 		"gift_note":   giftRecord.GiftNote,
+		"card_id":     giftRecord.CardID,
 	}
 	if err := global.DB.Model(&models.GiftRecord{}).Where("id = ?", giftID).Updates(update).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{

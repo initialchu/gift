@@ -2591,3 +2591,255 @@ PersonName  →  "person_name"   →  { person_name: "张三" }
 3. 修复 GiftRecords.vue 的死代码和 try-catch 结构
 4. 实现 GiftRecords 编辑功能
 5. 继续 Card.vue 或 Home.vue
+
+---
+
+# 24. 人情卡片后端设计
+
+## 24.1 功能概述
+
+按人名汇总所有礼金往来记录，生成"人情卡片"：
+
+- **汇总卡片**：每个人的来/往次数、来/往总额、净差额
+- **点击卡片**：查看该人的全部明细记录
+- **点击明细**：跳转到对应礼薄详情页
+
+## 24.2 数据来源
+
+卡片的汇总数据跨两张表：
+
+```
+gift_records（记录）          gift_books（礼薄）
+├── person_name              ├── id
+├── amount           JOIN    ├── event_name
+├── gift_book_id ─────────── ├── event_date
+└── address, gift_note       └── direction（来/往）
+```
+
+direction 决定 amount 是"收"还是"出"，所以必须 JOIN。
+
+## 24.3 API 设计
+
+| 方法 | 路径 | 权限 | 说明 |
+|------|------|------|------|
+| GET | `/api/cards` | 登录 | 按人名汇总列表 |
+| GET | `/api/cards/detail?card_id=5` | 登录 | 某卡片全部往来明细 |
+
+放在公开组（authMiddleware），普通用户也可查看。
+
+## 24.4 汇总 SQL 解析
+
+```sql
+SELECT
+  person_name,
+  COUNT(CASE WHEN gb.direction = '来' THEN 1 END)    AS received_count,
+  COALESCE(SUM(CASE WHEN gb.direction = '来' THEN gr.amount ELSE 0 END), 0) AS received_amount,
+  COUNT(CASE WHEN gb.direction = '往' THEN 1 END)    AS given_count,
+  COALESCE(SUM(CASE WHEN gb.direction = '往' THEN gr.amount ELSE 0 END), 0) AS given_amount,
+  COALESCE(SUM(CASE WHEN gb.direction = '来' THEN gr.amount ELSE -gr.amount END), 0) AS net_amount
+FROM gift_records AS gr
+JOIN gift_books AS gb ON gr.gift_book_id = gb.id
+GROUP BY gr.person_name
+ORDER BY gr.person_name
+```
+
+**关键点：**
+- `CASE WHEN direction = '来' THEN 1 END` — 只计"来"的条数，NULL 不计入 COUNT
+- `COALESCE(SUM(...), 0)` — 防止 NULL，返回 0
+- net_amount：来为正、往为负，自动得差值（正数=净收，负数=净出）
+
+**为什么用 Raw SQL 而不是 GORM 链式调用？**
+
+GORM 的链式 API 对 CASE WHEN + COALESCE + 多聚合字段的复杂查询支持不好。`db.Raw()` 最直接清晰。
+
+## 24.5 明细查询思路
+
+```go
+db.Table("gift_records").
+    Select("gift_records.*, gift_books.event_name, gift_books.event_date, gift_books.direction").
+    Joins("JOIN gift_books ON gift_records.gift_book_id = gift_books.id").
+    Where("gift_records.card_id = ?", cardID).
+    Order("gift_books.event_date DESC").
+    Find(&records)
+```
+
+用 `card_id` 查询（不是 person_name），精确到具体的一张卡片。明细需要返回 `gift_book_id` 和 `event_name`，供前端跳转。
+
+## 24.6 DTO 结构体
+
+```go
+// controllers/card.go
+
+// 汇总卡片
+type CardSummary struct {
+    PersonName      string  `json:"person_name"`
+    ReceivedCount   int64   `json:"received_count"`
+    ReceivedAmount  float64 `json:"received_amount"`
+    GivenCount      int64   `json:"given_count"`
+    GivenAmount     float64 `json:"given_amount"`
+    NetAmount       float64 `json:"net_amount"`
+}
+
+// 明细记录（含礼薄信息）
+type CardDetail struct {
+    ID          uint    `json:"id"`
+    GiftBookID  uint    `json:"gift_book_id"`
+    PersonName  string  `json:"person_name"`
+    Amount      float64 `json:"amount"`
+    Address     string  `json:"address,omitempty"`
+    GiftNote    string  `json:"gift_note,omitempty"`
+    EventName   string  `json:"event_name"`
+    EventDate   string  `json:"event_date"`
+    Direction   string  `json:"direction"`
+}
+```
+
+`CardDetail` 包含了跳转所需的所有字段：`gift_book_id`（跳转用）、`event_name`（显示礼薄名）、`direction`（显示方向）。
+
+## 24.7 控制器函数
+
+```go
+// GetCards 获取所有卡片汇总
+func GetCards(c *gin.Context) {
+    var cards []CardSummary
+    err := global.DB.Raw(`
+        SELECT
+            gr.person_name,
+            COUNT(CASE WHEN gb.direction = '来' THEN 1 END) AS received_count,
+            COALESCE(SUM(CASE WHEN gb.direction = '来' THEN gr.amount ELSE 0 END), 0) AS received_amount,
+            COUNT(CASE WHEN gb.direction = '往' THEN 1 END) AS given_count,
+            COALESCE(SUM(CASE WHEN gb.direction = '往' THEN gr.amount ELSE 0 END), 0) AS given_amount,
+            COALESCE(SUM(CASE WHEN gb.direction = '来' THEN gr.amount ELSE -gr.amount END), 0) AS net_amount
+        FROM gift_records AS gr
+        JOIN gift_books AS gb ON gr.gift_book_id = gb.id
+        GROUP BY gr.person_name
+        ORDER BY gr.person_name
+    `).Scan(&cards).Error
+
+    if err != nil {
+        c.JSON(http.StatusInternalServerError, gin.H{"error": "获取卡片失败"})
+        return
+    }
+
+    c.JSON(http.StatusOK, gin.H{"cards": cards})
+}
+
+// GetCardDetail 获取某人的往来明细
+func GetCardDetail(c *gin.Context) {
+    name := c.Query("name")
+    if name == "" {
+        c.JSON(http.StatusBadRequest, gin.H{"error": "缺少 name 参数"})
+        return
+    }
+
+    var records []CardDetail
+    err := global.DB.Table("gift_records").
+        Select("gift_records.*, gift_books.event_name, gift_books.event_date, gift_books.direction").
+        Joins("JOIN gift_books ON gift_records.gift_book_id = gift_books.id").
+        Where("gift_records.person_name = ?", name).
+        Order("gift_books.event_date DESC").
+        Scan(&records).Error
+
+    if err != nil {
+        c.JSON(http.StatusInternalServerError, gin.H{"error": "获取明细失败"})
+        return
+    }
+
+    c.JSON(http.StatusOK, gin.H{"records": records})
+}
+```
+
+## 24.8 路由挂接
+
+在 `router/router.go` 的公开组（authMiddleware）添加：
+
+```go
+api.GET("/cards", controllers.GetCards)
+api.GET("/cards/detail", controllers.GetCardDetail)
+```
+
+放在 `/giftbooks` 附近，逻辑上都是查询类接口。
+
+## 24.9 改动清单（实施版）
+
+| 文件 | 动作 | 内容 |
+|------|------|------|
+| `models/card.go` | 新建 | Card 模型 |
+| `models/gift.go` | 修改 | GiftRecord 加 CardID 字段 |
+| `config/db.go` | 修改 | Autotable 加 Card + MigrateCards 迁移函数 |
+| `controllers/card.go` | 新建 | GetCards（聚合）+ GetCardDetail（明细） |
+| `controllers/giftrecord.go` | 修改 | AddGift 自动创建卡片 + UpdateGift 开放 card_id |
+| `router/router.go` | 修改 | 公开组加 2 条路由 |
+| `main.go` | 修改 | 启动时调用 MigrateCards() |
+
+## 24.10 前端对接思路（预览）
+
+Card.vue 页面结构：
+
+```
+┌ 搜索框：[        ] 🔍
+│
+├ 卡片网格（CSS Grid）
+│ ┌──────────┐ ┌──────────┐
+│ │ 张三      │ │ 李四      │
+│ │ 📥 3次800 │ │ 📥 1次200 │
+│ │ 📤 2次500 │ │ 📤 3次600 │
+│ │ +300 🟢  │ │ -400 🔴  │
+│ └──────────┘ └──────────┘
+│
+└ 点击卡片 → 切换为明细视图
+    ┌──────────────────────────────┐
+    │ ← 返回卡片   张三 的往来明细   │
+    │ 2026-01-15 婚礼    来 500 元  │ → 跳转礼薄
+    │ 2026-03-20 满月酒  来 300 元  │
+    │ ...                         │
+    └──────────────────────────────┘
+```
+
+API 调用：
+- `GET /api/cards` → 卡片列表数据
+- `GET /api/cards/detail?card_id=5` → 某卡片明细
+- 点击明细行 → `router.push('/giftbooks/' + gift_book_id)`
+
+---
+
+## 24.11 实施记录（2026-06-03）
+
+### 实际改动清单
+
+| 文件 | 动作 | 内容 |
+|------|------|------|
+| `models/card.go` | 新建 | Card 模型（PersonName + Note + Records 关联） |
+| `models/gift.go` | 修改 | GiftRecord 加 CardID uint `gorm:"index"` |
+| `config/db.go` | 修改 | Autotable 加 Card；新增 MigrateCards() 迁移函数 |
+| `controllers/card.go` | 新建 | GetCards（Raw SQL 聚合）+ GetCardDetail（card_id 参数） |
+| `controllers/giftrecord.go` | 修改 | AddGift：card_id=0 时自动查找/创建卡片；UpdateGift：update map 加 card_id |
+| `router/router.go` | 修改 | 公开组加 GET /cards + GET /cards/detail?card_id= |
+| `main.go` | 修改 | InitConfig 之后调用 MigrateCards() |
+
+### 设计调整
+
+相比 24.4 的原设计，实施时做了以下调整：
+
+| 原设计 | 实施 | 原因 |
+|--------|------|------|
+| 汇总按 person_name 分组 | 按 card_id 分组（JOIN cards 表） | 避免同名混淆，card_id 是唯一标识 |
+| 明细用 `?name=` 参数 | 用 `?card_id=` 参数 | card_id 精确到具体的人 |
+| 汇总 SQL 只 JOIN gift_books | 额外 JOIN cards 表 | 获取 card_id 输出 |
+
+### 数据迁移策略
+
+- **时机**：Autotable 建表后、CreateAdmin 之前
+- **幂等**：每次启动检查 `card_id = 0` 的记录，已迁移则跳过
+- **三步**：① 人名字段去重 → ② 逐个建 Card → ③ UPDATE 回填 card_id
+- **后端取巧**：AddGift 的 card_id 参数不会自动绑定，GiftRecord 新增的 CardID 字段 `gorm:"index" json:"card_id"` 可绑定，验证通过
+
+### 向前兼容
+
+AddGift 向前兼容，card_id=0 时自动从 person_name 创建卡片，现有前端无需改动。
+
+### 关于同名问题
+
+- 迁移阶段：现有数据按 person_name 去重建卡，同名 -> 合为一张（无法区分）
+- 后续添加：card_id=0 + 新 person_name → 新建卡片（自动区分）
+- 编辑记录：UpdateGift 已开放 card_id 修改，可手动拆分记录到不同卡片

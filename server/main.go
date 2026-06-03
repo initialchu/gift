@@ -15,6 +15,9 @@ import (
 func main() {
 	config.InitConfig()
 
+	// 数据迁移：将现有记录按人名归集为卡片
+	config.MigrateCards()
+
 	// 初始化种子数据：首次启动自动创建管理员
 	config.CreateAdmin()
 

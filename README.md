@@ -44,11 +44,13 @@ gift/
 │   ├── models/
 │   │   ├── user.go              # User 模型 + LoginRequest DTO
 │   │   └── gift.go              # GiftBook 模型 + GiftRecord 模型
+│   │   └── card.go              # Card 模型（人情卡片 — 按人归集）
 │   ├── controllers/
 │   │   ├── auth.go              # 登录
 │   │   ├── user.go              # 用户管理
 │   │   ├── giftbook.go          # 礼薄 CRUD
-│   │   └── giftrecord.go        # 礼金记录 CRUD（含归属校验）
+│   │   └── giftrecord.go        # 礼金记录 CRUD（含归属校验 + card_id 关联）
+│   │   └── card.go              # 人情卡片（汇总聚合 + 明细查询）
 │   ├── middlewares/
 │   │   └── auth.go              # AuthMiddleware（JWT 鉴权）+ AdminMiddleware（管理员授权）
 │   ├── router/
@@ -101,6 +103,8 @@ gift/
 | GET | `/api/giftbooks` | 礼薄列表 |
 | GET | `/api/giftbook/:id` | 礼薄详情（含所有记录） |
 | GET | `/api/giftrecord/:id/records` | 指定礼薄的礼金记录列表 |
+| GET | `/api/cards` | 人情卡片汇总列表（按人归集，含来/往次数和金额） |
+| GET | `/api/cards/detail?card_id=` | 某张卡片的往来明细（含礼薄名、日期，可跳转） |
 
 ### 管理员接口（JWT + Admin）
 
