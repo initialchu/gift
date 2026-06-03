@@ -2479,3 +2479,115 @@ booksRef.value?.deletebook()      // ❌ 没暴露，TS 报错
 ```
 
 **没有 defineExpose 的世界：** 只能靠事件（emit）或全局状态（Pinia）通信。对于"父调子方法"这种场景，defineExpose 是最直接的方式。
+
+---
+
+# 23. 2026-06-01：礼薄卡片列表实施 + 礼金记录 CRUD Code Review
+
+## 23.1 今日完成
+
+### 任务 1：礼薄卡片列表完善 ✅
+
+| # | 文件 | 改动 |
+|---|------|------|
+| 1 | `Books.vue` | ① 编辑弹窗（el-dialog + el-form，预填数据 + submitEdit）② `defineExpose({ fetchGiftBooks })` ③ `@click="goDetail(book.ID)"` 卡片跳转 + `@click.stop` 阻止冒泡 |
+| 2 | `GiftBooks.vue` | ① `<Books ref="booksRef" />` ② 创建成功后 `booksRef.value?.fetchGiftBooks()` |
+| 3 | `router/index.ts` | 新增 `/giftbooks/:id` → `GiftBookDetail.vue` |
+| 4 | `GiftBookDetail.vue` | 🆕 基本信息展示 + 返回按钮 |
+| 5 | `README.md` | 更新前端项目结构 |
+
+Git commit: `c6e7144 feat: 礼薄卡片网格完善 — 编辑弹窗 + 卡片跳转详情 + 创建刷新列表`
+
+### 任务 2：礼金记录增删功能 + 自定义金额
+
+用户在 GiftBookDetail.vue 实现了添加记录弹窗，使用自定义金额模式：
+
+```
+el-radio-group（预设值）
+  ├── 100 / 200 / 500
+  └── 自定义 → v-if 显示 el-input number
+
+submitRecord 提交时：
+  selectedAmount === 0 ? customAmount : selectedAmount
+```
+
+GiftRecords.vue 实现了表格展示 + 搜索 + 删除。
+
+## 23.2 Code Review：礼金记录发现的问题
+
+### 🔴 关键问题
+
+**1. 新增记录后表格不刷新**
+
+GiftBookDetail 的 `submitRecord` 成功后关弹窗，但 GiftRecords 的 `fetchRecords` 没有被调用。缺少 ref + defineExpose 联动：
+
+```
+GiftBookDetail（父）            GiftRecords（子）
+───────────────────            ──────────────
+<GiftRecords ref="recordsRef" />
+                                defineExpose({ fetchRecords })
+submitRecord 成功后
+  → recordsRef.fetchRecords()
+```
+
+**2. 表单提交后没有重置**
+
+`dialogVisible = false` 后，`form`、`selectedAmount`、`customAmount` 都没有清空。下次打开弹窗还会看到上次的数据。
+
+### 🟡 代码问题
+
+**3. 死代码** — `const tableData = ref<Record[]>([]) || []`，`ref()` 永远返回对象，`|| []` 永远不会执行。
+
+**4. 删除的 catch 混在一起** — `ElMessageBox.confirm` 的取消和 `axios.post` 的异常挤在同一个 try-catch，用 `if(err !== 'cancel')` 区分，不够清晰。
+
+建议拆成两个 try-catch：
+
+```ts
+// 先确认
+try {
+  await ElMessageBox.confirm('确定要删除吗？', '提示', { ... })
+} catch {
+  return  // 用户取消，直接退出
+}
+
+// 再删
+try {
+  await axios.post(`/admin/giftrecord/${id}/records/${rid}`)
+  ElMessage.success('删除成功')
+  fetchRecords()
+} catch (err: any) {
+  ElMessage.error(err.response?.data?.error || '删除失败')
+}
+```
+
+**5. 未使用的 import** — `ElTableColumn` import 了但没用到（Element Plus 全局注册后模板里直接用）。
+
+**6. `handleEdit` 空函数** — 待实现。
+
+## 23.3 前后端命名对应关系（知识点）
+
+Go 的 `json` tag 决定了前端收到的 JSON key，而不是 Go 的字段名：
+
+```go
+// 后端
+type GiftRecord struct {
+    GiftBookID uint   `json:"gift_book_id"`  // ← json tag 决定
+    PersonName string `json:"person_name"`
+}
+```
+
+```
+Go 字段名        json tag           前端收到的 JSON key
+GiftBookID  →  "gift_book_id"  →  { gift_book_id: 1 }
+PersonName  →  "person_name"   →  { person_name: "张三" }
+```
+
+**原则：后端 `json:"xxx"` 写什么，前端 TS 就写什么。**
+
+## 23.4 明日待办
+
+1. 修复 GiftBookDetail ↔ GiftRecords 联动刷新（ref + defineExpose）
+2. 修复表单提交后重置（form 复位函数）
+3. 修复 GiftRecords.vue 的死代码和 try-catch 结构
+4. 实现 GiftRecords 编辑功能
+5. 继续 Card.vue 或 Home.vue

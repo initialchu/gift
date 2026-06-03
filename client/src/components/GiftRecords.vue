@@ -1,9 +1,159 @@
 <template>
-  <el-card style="max-width: 480px">
-    <template #header>Yummy hamburger</template>
-    <img
-      src="https://shadow.elemecdn.com/app/element/hamburger.9cf7b091-55e9-11e9-a976-7f4d0b07eef6.png"
-      style="width: 100%"
-    />
-  </el-card>
+  <el-table :data="filterTableData" style="width: 100%">
+    <el-table-column label="姓名" prop="person_name" />
+    <el-table-column label="礼金" prop="amount" />
+    <el-table-column label="地址" prop="address" />
+    <el-table-column label="备注" prop="gift_note" />
+    <el-table-column align="right">
+      <template #header>
+        <el-input v-model="search" size="small" placeholder="Type to search" />
+      </template>
+      <template #default="scope">
+        <el-button size="small" @click="handleEdit(scope.row)">
+          编辑
+        </el-button>
+        <el-button
+          size="small"
+          type="danger"
+          @click="handleDelete(String(route.params.id), scope.row.ID)"
+        >
+          删除
+        </el-button>
+      </template>
+    </el-table-column>
+  </el-table>
+
+  <!-- 编辑记录弹窗 -->
+  <el-dialog v-model="editDialogVisible" title="编辑记录" width="450px">
+    <el-form :model="editForm" label-width="60px">
+      <el-form-item label="姓名">
+        <el-input v-model="editForm.person_name" />
+      </el-form-item>
+      <el-form-item label="金额">
+        <el-input v-model.number="editForm.amount" type="number" />
+      </el-form-item>
+      <el-form-item label="地址">
+        <el-input v-model="editForm.address" />
+      </el-form-item>
+      <el-form-item label="备注">
+        <el-input v-model="editForm.gift_note" />
+      </el-form-item>
+    </el-form>
+    <template #footer>
+      <el-button @click="editDialogVisible = false">取消</el-button>
+      <el-button type="primary" @click="submitEdit">确定</el-button>
+    </template>
+  </el-dialog>
 </template>
+
+<script lang="ts" setup>
+
+import { computed, ref } from 'vue'
+import axios from '../axios'
+import { ElMessage } from 'element-plus'
+import {onMounted} from 'vue'
+import {useRoute} from 'vue-router'
+import { ElMessageBox } from 'element-plus'
+const route = useRoute()
+interface Record {
+  ID:number
+  gift_book_id : number
+  person_name: string
+  amount: number
+  address: string
+  gift_note:string
+
+}
+
+const search = ref('')
+const filterTableData = computed(() =>
+  tableData.value.filter(
+    (data) =>
+      !search.value ||
+      data.person_name.toLowerCase().includes(search.value.toLowerCase())
+  )
+)
+// 编辑记录
+const editDialogVisible = ref(false)
+const editingId = ref<number | null>(null)
+const editForm = ref({
+  person_name: '',
+  amount: 0,
+  address: '',
+  gift_note: '',
+})
+
+const handleEdit = (row: Record) => {
+  editingId.value = row.ID
+  editForm.value = {
+    person_name: row.person_name,
+    amount: row.amount,
+    address: row.address || '',
+    gift_note: row.gift_note || '',
+  }
+  editDialogVisible.value = true
+}
+
+const submitEdit = async () => {
+  try {
+    await axios.post(
+      `/admin/giftrecord/${route.params.id}/records/${editingId.value}/edit`,
+      editForm.value,
+    )
+    ElMessage.success('编辑成功')
+    editDialogVisible.value = false
+    fetchRecords()
+  } catch (err: any) {
+    const msg = err.response?.data?.error || '编辑失败'
+    ElMessage.error(msg)
+  }
+}
+
+//删除记录
+const deleteRecord = async(id:string,rid:number)=>{
+    try{
+      await axios.post(`/admin/giftrecord/${id}/records/${rid}`)
+      ElMessage.success('删除成功')
+      fetchRecords()
+    }catch(err:any){
+      const msg = err.response?.data?.error||'删除失败'
+      ElMessage.error(msg)
+    }
+}
+const handleDelete = async(id:string ,rid:number) => {
+  try{
+    await ElMessageBox.confirm('确定要删除吗？', '提示', {
+      confirmButtonText: '确定',
+      cancelButtonText: '取消',
+      type: 'warning',
+    })
+    deleteRecord(id,rid)
+    
+  }catch{
+    
+  }
+  
+}
+//获取Record数据
+
+const tableData=ref<Record[]>([])
+const fetchRecords = async ()=>{
+  try{
+    const res = await axios.get(`/giftrecord/${route.params.id}/records`)
+    
+    tableData.value = res.data.gift_records
+  }catch(err:any){
+    const msg = err.response?.data?.error||'获取记录失败'
+    ElMessage.error(msg)
+  }
+}  
+defineExpose({
+  fetchRecords
+})
+
+onMounted(()=>{
+  fetchRecords()
+  
+})
+
+</script>
