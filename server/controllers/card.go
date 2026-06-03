@@ -40,8 +40,8 @@ func GetCards(c *gin.Context) {
 			c.person_name,
 			COUNT(CASE WHEN gb.direction = '来' THEN 1 END)       AS received_count,
 			COALESCE(SUM(CASE WHEN gb.direction = '来' THEN gr.amount ELSE 0 END), 0) AS received_amount,
-			COUNT(CASE WHEN gb.direction = '往' THEN 1 END)       AS given_count,
-			COALESCE(SUM(CASE WHEN gb.direction = '往' THEN gr.amount ELSE 0 END), 0) AS given_amount,
+			COUNT(CASE WHEN gb.direction = '去' THEN 1 END)       AS given_count,
+			COALESCE(SUM(CASE WHEN gb.direction = '去' THEN gr.amount ELSE 0 END), 0) AS given_amount,
 			COALESCE(SUM(CASE WHEN gb.direction = '来' THEN gr.amount ELSE -gr.amount END), 0) AS net_amount
 		FROM gift_records AS gr
 		JOIN gift_books AS gb ON gr.gift_book_id = gb.id

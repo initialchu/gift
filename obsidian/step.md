@@ -2843,3 +2843,187 @@ AddGift 向前兼容，card_id=0 时自动从 person_name 创建卡片，现有�
 - 迁移阶段：现有数据按 person_name 去重建卡，同名 -> 合为一张（无法区分）
 - 后续添加：card_id=0 + 新 person_name → 新建卡片（自动区分）
 - 编辑记录：UpdateGift 已开放 card_id 修改，可手动拆分记录到不同卡片
+
+---
+
+## 24.12 前端设计
+
+### 页面架构：单页双视图
+
+Card.vue 在同一组件内用 `v-if` 切换两个视图，不需要新增路由：
+
+```
+view === 'grid'（默认）                view === 'detail'（点击卡片后）
+
+┌ 搜索：[        ] 🔍                 ┌ ← 返回卡片列表   张三 的往来明细
+│                                     │
+├ 卡片网格 (CSS Grid)                 ├ el-table 明细表格
+│ ┌──────────┐ ┌──────────┐          │ ┌──────────────────────────────┐
+│ │ 👤 张三   │ │ 👤 李四   │          │ │ 日期  │ 事件  │方向│金额  操作│
+│ │ 📥3次 800│ │ 📥1次 200│          │ │ 01-15 │婚礼  │ 来 │ 500  跳转│
+│ │ 📤2次 500│ │ 📤3次 600│          │ │ 03-20 │满月酒│ 来 │ 300  跳转│
+│ │ +300 🟢 │ │ -400 🔴 │          │ │ ...  │ ...  │ .. │ ...     │
+│ └──────────┘ └──────────┘          │ └──────────────────────────────┘
+```
+
+### 数据流
+
+```
+onMounted
+  → GET /api/cards
+  → cards = res.data.cards  (CardSummary[])
+
+点击卡片
+  → selectedCard = card
+  → GET /api/cards/detail?card_id={card.card_id}
+  → records = res.data.records  (CardDetail[])
+  → view = 'detail'
+
+点击明细行
+  → router.push('/giftbooks/' + record.gift_book_id)
+
+点击返回
+  → view = 'grid'
+```
+
+### TS 类型
+
+```ts
+interface CardSummary {
+  card_id: number
+  person_name: string
+  received_count: number
+  received_amount: number
+  given_count: number
+  given_amount: number
+  net_amount: number
+}
+
+interface CardDetail {
+  id: number
+  gift_book_id: number
+  person_name: string
+  amount: number
+  address: string
+  gift_note: string
+  event_name: string
+  event_date: string
+  direction: string
+}
+```
+
+### 需要的响应式数据
+
+| 变量 | 类型 | 说明 |
+|------|------|------|
+| `view` | `'grid' \| 'detail'` | 当前视图 |
+| `cards` | `CardSummary[]` | 汇总卡片列表 |
+| `search` | `string` | 搜索关键词 |
+| `selectedCard` | `CardSummary \| null` | 当前选中的卡片 |
+| `records` | `CardDetail[]` | 选中卡片的明细 |
+| `loading` | `boolean` | 加载状态 |
+
+### 需要的函数
+
+| 函数 | 触发 | 逻辑 |
+|------|------|------|
+| `fetchCards()` | onMounted | GET /api/cards → cards |
+| `openDetail(card)` | 点击卡片 | 设 selectedCard → GET /api/cards/detail?card_id= → records → view='detail' |
+| `backToGrid()` | 点击返回 | view='grid' |
+| `goToGiftBook(row)` | 点击明细行 | router.push(`/giftbooks/${row.gift_book_id}`) |
+
+### 计算属性
+
+```ts
+const filteredCards = computed(() =>
+  cards.value.filter(c =>
+    !search.value ||
+    c.person_name.toLowerCase().includes(search.value.toLowerCase())
+  )
+)
+```
+
+### 模板结构（伪代码）
+
+```html
+<template>
+  <div class="cards-page">
+    <!-- grid 视图 -->
+    <template v-if="view === 'grid'">
+      <div class="cards-header">
+        <h2>人情卡片</h2>
+        <el-input v-model="search" placeholder="搜索人名..." clearable />
+      </div>
+
+      <div class="card-grid" v-loading="loading">
+        <el-card v-for="card in filteredCards" :key="card.card_id"
+                 shadow="hover" @click="openDetail(card)">
+          <h3>{{ card.person_name }}</h3>
+          <p>📥 来：{{ card.received_count }} 次，{{ card.received_amount }} 元</p>
+          <p>📤 往：{{ card.given_count }} 次，{{ card.given_amount }} 元</p>
+          <p :class="card.net_amount >= 0 ? 'positive' : 'negative'">
+            📊 差值：{{ card.net_amount >= 0 ? '+' : '' }}{{ card.net_amount }}
+          </p>
+        </el-card>
+        <el-empty v-if="!loading && filteredCards.length === 0" description="暂无卡片" />
+      </div>
+    </template>
+
+    <!-- detail 视图 -->
+    <template v-if="view === 'detail'">
+      <div class="detail-header">
+        <el-button text @click="backToGrid">← 返回卡片列表</el-button>
+        <h2>{{ selectedCard?.person_name }} 的往来明细</h2>
+      </div>
+
+      <el-table :data="records" @row-click="goToGiftBook">
+        <el-table-column label="日期" prop="event_date" />
+        <el-table-column label="事件" prop="event_name" />
+        <el-table-column label="方向" prop="direction">
+          <template #default="{ row }">
+            <el-tag :type="row.direction === '来' ? 'success' : 'danger'">
+              {{ row.direction }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="金额" prop="amount" />
+      </el-table>
+    </template>
+  </div>
+</template>
+```
+
+### 样式要点
+
+```css
+/* 卡片网格 — 复用 Books.vue 的 Grid 模式 */
+.card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 16px;
+}
+
+/* 卡片 hover 动效 */
+.card-grid .el-card {
+  cursor: pointer;
+  transition: transform 0.2s;
+}
+.card-grid .el-card:hover {
+  transform: translateY(-4px);
+}
+
+/* 净额颜色 */
+.positive { color: #67c23a; font-weight: bold; }  /* 绿色：净收 */
+.negative { color: #f56c6c; font-weight: bold; }  /* 红色：净出 */
+
+/* 明细表格行可点击 */
+.el-table__row { cursor: pointer; }
+```
+
+### 改动清单
+
+| 文件 | 动作 | 内容 |
+|------|------|------|
+| `views/Card.vue` | 重写 | 单页双视图（卡片网格 + 明细表格） |
+
+路由已有（`/card` → Card.vue），无需改动。

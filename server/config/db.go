@@ -79,10 +79,10 @@ func Autotable() {
 }
 
 // MigrateCards 将现有 gift_records 按 person_name 归集为卡片，回填 card_id
-// 只执行一次：card_id = 0 的记录视为未迁移
+// card_id 为 0 或 NULL 的记录视为未迁移
 func MigrateCards() {
 	var count int64
-	global.DB.Model(&models.GiftRecord{}).Where("card_id = 0").Count(&count)
+	global.DB.Model(&models.GiftRecord{}).Where("card_id IS NULL OR card_id = 0").Count(&count)
 	if count == 0 {
 		return
 	}
@@ -92,7 +92,7 @@ func MigrateCards() {
 	var names []string
 	global.DB.Model(&models.GiftRecord{}).
 		Select("DISTINCT person_name").
-		Where("card_id = 0").
+		Where("card_id IS NULL OR card_id = 0").
 		Pluck("person_name", &names)
 
 	for _, name := range names {
@@ -104,7 +104,7 @@ func MigrateCards() {
 	global.DB.Exec(`
 		UPDATE gift_records
 		SET card_id = (SELECT id FROM cards WHERE cards.person_name = gift_records.person_name)
-		WHERE card_id = 0
+		WHERE card_id IS NULL OR card_id = 0
 	`)
 	log.Printf("迁移完成")
 }
