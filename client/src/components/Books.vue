@@ -29,6 +29,7 @@
                     <span>{{ formatDate(book.event_date) }}</span>
                     <el-tag class="direction-tag" :type="book.direction==='来'? 'success':'danger'">{{ book.direction }}</el-tag>
                 </div>
+                
             </div>
            
             
@@ -200,6 +201,7 @@ const deletebook = async(id:number)=>{
     width:80%;
     border-radius:10px;
 }
+
 .card-content{
     
     display:flex;

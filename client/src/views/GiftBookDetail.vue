@@ -1,6 +1,6 @@
 <template>
   <div class="giftbook-detail">
-    <el-button text @click="router.push('/giftbooks')">&larr; 返回礼薄列表</el-button>
+    <el-button text @click="router.back()">&larr; 返回</el-button>
 
     <el-card v-loading="loading">
       <template #header>
