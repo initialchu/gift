@@ -32,7 +32,9 @@ const loading = ref(false)
 const redirect = (route.query.redirect as string) || '/home'
 // 登录按钮点击事件
 const handleLogin = async()=>{
+    if (loading.value) return
     loading.value = true
+    
     try{
         const success = await authStore.login(user.value.username, user.value.password)
         if(success){

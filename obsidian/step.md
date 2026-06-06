@@ -3093,3 +3093,502 @@ volumes:
 ```
 
 没有 volume，容器一删数据就没了。
+
+---
+
+# 26. 登录安全：验证码 + 3 次错误锁定
+
+## 26.1 需求概述
+
+两个经典安全功能：
+
+| 功能 | 目的 | 防什么 |
+|------|------|--------|
+| 图形验证码 | 人机识别 | 自动化脚本暴力破解 |
+| 3 次错误锁定 | 限制重试 | 人工穷举密码 |
+
+两者配合形成双防线：验证码拦 bots，锁定拦人。
+
+## 26.2 验证码（CAPTCHA）
+
+### 整体流程
+
+```
+用户打开登录页
+      │
+      ▼
+前端请求 GET /api/auth/captcha
+      │
+      ▼
+后端生成图片 + 随机码，存内存，返回 { captcha_id, image(base64) }
+      │
+      ▼
+前端展示图片 ← 用户看不清可点击刷新（重新请求）
+      │
+用户输入 账号 + 密码 + 验证码
+      │
+      ▼
+POST /api/auth/login { username, password, captcha_id, captcha_code }
+      │
+      ▼
+后端校验顺序：验证码有效？→ 验证码正确？→ 账号锁定？→ 用户名正确？→ 密码正确？
+                                                          │
+                                            ┌─ 任一步失败 → 返回对应错误
+                                            └─ 全部通过 → 返回 token
+```
+
+### 为什么验证码校验在账号密码之前？
+
+```
+❌ 错误顺序：先查用户名 → 验证码 → 密码
+   问题：脚本可以先试出哪些用户名存在（不同错误提示），再做定向攻击
+
+✅ 正确顺序：先验证码 → 锁定检查 → 用户名 → 密码
+   好处：不管用户名对不对，验证码没通过一律拒绝。攻击者无法区分
+         "验证码错了" 和 "用户名不存在"，收不到有效反馈
+```
+
+另外，密码校验失败时**不区分**"用户名不存在"和"密码错误"——返回相同的错误信息（已实现）。
+
+### 后端实现
+
+**依赖：** `github.com/mojocn/base64Captcha`
+
+```bash
+go get github.com/mojocn/base64Captcha
+```
+
+**新建 `server/utils/captcha.go`：**
+
+```go
+package utils
+
+import (
+    "github.com/mojocn/base64Captcha"
+)
+
+var captchaStore = base64Captcha.DefaultMemStore  // 内存存储，自带过期
+
+// 配置：数字验证码，4 位，宽 240px 高 80px
+var captchaDriver = base64Captcha.NewDriverDigit(80, 240, 4, 0.7, 80)
+
+// GenerateCaptcha 生成验证码，返回 id、base64 图片、答案（仅用于调试）
+func GenerateCaptcha() (id string, b64s string, err error) {
+    c := base64Captcha.NewCaptcha(captchaDriver, captchaStore)
+    return c.Generate()
+}
+
+// VerifyCaptcha 校验验证码（不区分大小写）
+func VerifyCaptcha(id, answer string) bool {
+    return captchaStore.Verify(id, answer, true)
+}
+```
+
+**关键点解析：**
+
+| 组件 | 作用 |
+|------|------|
+| `DefaultMemStore` | base64Captcha 自带的内存存储，自动清理过期验证码（默认 3 分钟） |
+| `NewDriverDigit(80, 240, 4, 0.7, 80)` | 高 80px、宽 240px、4 位数字、干扰强度 0.7、噪声 80 个点 |
+| `captchaStore.Verify(id, answer, true)` | 第三个参数 `true` = 验证码用过即删，防止同一个验证码重复使用 |
+
+**为什么用内存存储而不是数据库？**
+- 验证码有有效期（3 分钟），是临时数据，不需要持久化
+- 判断过期由 captchaStore 自动处理，不用手动写定时清理
+- 服务重启后旧的 captcha_id 也拿不到，符合安全预期
+
+### 路由
+
+```go
+// router/router.go 的 auth 组：
+auth.POST("/login", controllers.Login)
+auth.GET("/captcha", controllers.GetCaptcha)   // ← 新增
+```
+
+**为什么 GET 而不是 POST？** 获取验证码是读操作，不改变状态，语义上 GET 更合适。
+
+### 控制器
+
+```go
+// controllers/auth.go
+
+func GetCaptcha(c *gin.Context) {
+    id, b64s, err := utils.GenerateCaptcha()
+    if err != nil {
+        c.JSON(http.StatusInternalServerError, gin.H{"error": "验证码生成失败"})
+        return
+    }
+    c.JSON(http.StatusOK, gin.H{
+        "captcha_id": id,
+        "captcha_img": b64s,   // "data:image/png;base64,..." 格式，可直接放 <img src>
+    })
+}
+```
+
+### LoginRequest 修改
+
+```go
+type LoginRequest struct {
+    Username    string `json:"username" binding:"required"`
+    Password    string `json:"password" binding:"required"`
+    CaptchaID   string `json:"captcha_id" binding:"required"`
+    CaptchaCode string `json:"captcha_code" binding:"required"`
+}
+```
+
+### Login 函数改动
+
+```go
+func Login(c *gin.Context) {
+    var luser models.LoginRequest
+    // ... 绑定 JSON ...
+
+    // ① 先校验验证码
+    if !utils.VerifyCaptcha(luser.CaptchaID, luser.CaptchaCode) {
+        c.JSON(http.StatusUnauthorized, gin.H{"error": "验证码错误或已过期"})
+        return
+    }
+
+    // ② 检查是否被锁定
+    if utils.IsLocked(luser.Username) {
+        remaining := utils.LockRemaining(luser.Username)
+        c.JSON(http.StatusUnauthorized, gin.H{
+            "error": fmt.Sprintf("账号已锁定，请 %d 分钟后重试", int(remaining.Minutes())),
+        })
+        return
+    }
+
+    // ③ 查用户（原有逻辑）
+    // ... global.DB.Where("username = ?", luser.Username).First(&user) ...
+
+    // ④ 验密码（原有逻辑）
+    // ... utils.CheckPWD(luser.Password, user.Password) ...
+
+    // ⑤ 登录成功 → 清除失败计数
+    utils.ResetAttempts(luser.Username)
+    // ... 生成 JWT、返回 token ...
+
+    // ⑥ 用户名或密码错误处 → 记录失败
+    // 在 ③ 查不到用户 或 ④ 密码不匹配 的地方：
+    // utils.RecordFailedAttempt(luser.Username)
+}
+```
+
+---
+
+## 26.3 3 次错误锁定
+
+### 数据结构
+
+在内存中用 map 追踪每个用户名的登录尝试：
+
+```go
+// server/utils/lockout.go
+
+package utils
+
+import (
+    "sync"
+    "time"
+)
+
+type loginStatus struct {
+    Attempts    int        // 连续失败次数
+    LockedUntil *time.Time // 锁定到期时间，nil 表示未锁定
+}
+
+var (
+    loginTracker = make(map[string]*loginStatus)
+    trackerMu    sync.Mutex  // 保证并发安全
+)
+
+const (
+    maxAttempts  = 3                // 最大失败次数
+    lockDuration = 15 * time.Minute // 锁定时长
+)
+```
+
+### 三个核心函数
+
+```go
+// RecordFailedAttempt 记录一次登录失败。达到 3 次自动锁定
+func RecordFailedAttempt(username string) {
+    trackerMu.Lock()
+    defer trackerMu.Unlock()
+
+    status, exists := loginTracker[username]
+    if !exists {
+        status = &loginStatus{}
+        loginTracker[username] = status
+    }
+
+    status.Attempts++
+    if status.Attempts >= maxAttempts {
+        t := time.Now().Add(lockDuration)
+        status.LockedUntil = &t
+    }
+}
+```
+
+```
+调用 RecordFailedAttempt("zhangsan")
+  → attempts: 1（第 1 次失败）
+  → attempts: 2（第 2 次失败）
+  → attempts: 3（第 3 次失败）→ lockedUntil = 当前时间 + 15 分钟
+```
+
+```go
+// IsLocked 检查用户是否处于锁定状态
+func IsLocked(username string) bool {
+    trackerMu.Lock()
+    defer trackerMu.Unlock()
+
+    status, exists := loginTracker[username]
+    if !exists || status.LockedUntil == nil {
+        return false
+    }
+
+    // 锁定时间已过 → 自动解锁
+    if time.Now().After(*status.LockedUntil) {
+        delete(loginTracker, username)  // 清除记录
+        return false
+    }
+    return true
+}
+```
+
+```go
+// ResetAttempts 登录成功后清除失败记录
+func ResetAttempts(username string) {
+    trackerMu.Lock()
+    defer trackerMu.Unlock()
+    delete(loginTracker, username)
+}
+
+// LockRemaining 返回剩余锁定时间
+func LockRemaining(username string) time.Duration {
+    trackerMu.Lock()
+    defer trackerMu.Unlock()
+
+    status, exists := loginTracker[username]
+    if !exists || status.LockedUntil == nil {
+        return 0
+    }
+    return time.Until(*status.LockedUntil)
+}
+```
+
+### 锁机制详解
+
+```
+用户 zhangsan 第一次输错密码
+  → RecordFailedAttempt → attempts = 1
+
+用户 zhangsan 第二次输错密码
+  → RecordFailedAttempt → attempts = 2
+
+用户 zhangsan 第三次输错密码
+  → RecordFailedAttempt → attempts = 3 ≥ 3 → lockedUntil = 15 分钟后
+
+用户 zhangsan 第四次尝试登录
+  → IsLocked → true → 返回 "账号已锁定，请 14 分钟后重试"
+
+15 分钟后
+  → IsLocked → time.Now().After(lockedUntil) → 解锁 + 清除记录
+
+用户 zhangsan 密码对了
+  → ResetAttempts → delete(loginTracker["zhangsan"]) → 计数器归零
+```
+
+### 为什么要 sync.Mutex？
+
+HTTP 请求是并发的。如果有两个请求同时进来操作同一个 username 的 loginTracker：
+
+```
+无锁情况：
+  请求 A 读 attempts=2         请求 B 读 attempts=2
+  请求 A 写 attempts=3         请求 B 写 attempts=3
+  两个都写 3，但没有一个触发锁定！
+
+有锁情况：
+  请求 A 获取锁 → 读 attempts=2 → 写 attempts=3 → 触发锁定 → 释放锁
+  请求 B 获取锁 → 读 attempts=3 → 已锁定 → 释放锁
+```
+
+### 为什么用内存而不是数据库？
+
+| | 内存 map | 数据库字段 |
+|---|---|---|
+| 复杂度 | 简单 | 需要 migrate 表 |
+| 持久化 | 重启丢失（重新计数） | 永久记录 |
+| 并发安全 | sync.Mutex | 数据库行锁 |
+| 适用场景 | 单实例、学习项目 | 多实例、生产环境 |
+
+当前用内存即可，逻辑清晰。升级为数据库时只需把 3 个函数的 map 操作换成 DB 查询。
+
+### 锁定粒度是"用户名"还是"IP"？
+
+```
+按用户名锁定 → 无论从哪台机器来，输错 3 次就锁（当前方案）
+按 IP 锁定   → 换了用户名也算（拦暴力枚举，但也可能误伤共享 IP）
+两者结合     → 最安全但最复杂
+```
+
+选按用户名锁定，简单直接。对于学习项目足够。
+
+---
+
+## 26.4 前端改动
+
+### 新增内容
+
+当前 [Login.vue](client/src/components/Login.vue) 只有账号+密码。需要新增：
+
+1. **验证码图片** — `<img>` 标签，src 直接放后端返回的 base64
+2. **验证码输入框** — `el-input`
+3. **刷新验证码** — 点击图片重新请求 `/api/auth/captcha`
+4. **登录请求加参数** — `captcha_id` + `captcha_code`
+
+### 数据流
+
+```
+onMounted / 点击刷新
+  → fetchCaptcha()
+  → GET /api/auth/captcha
+  → { captcha_id: "abc123", captcha_img: "data:image/png;base64,..." }
+
+handleLogin
+  → POST /api/auth/login {
+      username, password,
+      captcha_id: captchaId.value,
+      captcha_code: captchaCode.value
+    }
+  → 成功: 原有逻辑
+  → 失败: 显示错误 + 自动刷新验证码（防止旧验证码被重复尝试）
+```
+
+### 模板结构
+
+```html
+<el-form-item label="验证码">
+  <div class="captcha-row">
+    <el-input v-model="captchaCode" placeholder="请输入验证码" />
+    <img :src="captchaImg" @click="fetchCaptcha" class="captcha-img"
+         title="点击刷新验证码" />
+  </div>
+</el-form-item>
+```
+
+关键点：
+- 图片 `@click` 调用 `fetchCaptcha` 重新获取，用户看不清可以点
+- 图片加 `title` 提示用户可点击刷新
+- 登录失败后也要自动 `fetchCaptcha()`，防止用同一个 captcha_id 重试
+
+### 脚本新增
+
+```ts
+const captchaId = ref('')
+const captchaImg = ref('')
+const captchaCode = ref('')
+
+const fetchCaptcha = async () => {
+  try {
+    const res = await axios.get('/auth/captcha')
+    captchaId.value = res.data.captcha_id
+    captchaImg.value = res.data.captcha_img
+    captchaCode.value = ''  // 清空输入
+  } catch {
+    ElMessage.error('验证码加载失败')
+  }
+}
+
+// handleLogin 中：
+// POST /auth/login { username, password, captcha_id, captcha_code }
+// 失败时在 catch 里调用 fetchCaptcha() 刷新验证码
+
+// onMounted 时调用 fetchCaptcha()
+```
+
+---
+
+## 26.5 改动文件清单
+
+| # | 文件 | 动作 | 内容 |
+|---|------|------|------|
+| 1 | `server/utils/captcha.go` | **新建** | 验证码生成 + 校验（base64Captcha） |
+| 2 | `server/utils/lockout.go` | **新建** | 登录失败计数 + 锁定检查（内存 map + Mutex） |
+| 3 | `server/controllers/auth.go` | 修改 | Login：加验证码校验 + 锁定检查 + 失败计数；新增 GetCaptcha |
+| 4 | `server/models/user.go` | 修改 | LoginRequest 加 captcha_id + captcha_code 字段 |
+| 5 | `server/router/router.go` | 修改 | auth 组加 GET /auth/captcha |
+| 6 | `client/src/components/Login.vue` | 修改 | 加验证码图片 + 输入框 + 刷新逻辑 |
+| 7 | `server/go.mod` | 修改 | `go get github.com/mojocn/base64Captcha` |
+
+---
+
+## 26.6 完整登录流程（改动后）
+
+```
+POST /api/auth/login
+        │
+        ▼
+┌─────────────────────┐
+│ ① 校验验证码         │  ← VerifyCaptcha(id, code)
+│   验证码错误/过期     │  → 401 "验证码错误或已过期"（不泄露后续信息）
+└─────────┬───────────┘
+          │ 通过
+          ▼
+┌─────────────────────┐
+│ ② 检查是否锁定       │  ← IsLocked(username)
+│   已锁定             │  → 401 "账号已锁定，请X分钟后重试"
+└─────────┬───────────┘
+          │ 未锁定
+          ▼
+┌─────────────────────┐
+│ ③ 查询用户名         │  ← DB.Where("username = ?")
+│   用户不存在          │  → 401 "用户名或密码错误" + RecordFailedAttempt
+└─────────┬───────────┘
+          │ 存在
+          ▼
+┌─────────────────────┐
+│ ④ 校验密码           │  ← CheckPWD(pwd, hash)
+│   密码错误            │  → 401 "用户名或密码错误" + RecordFailedAttempt
+└─────────┬───────────┘
+          │ 正确
+          ▼
+┌─────────────────────┐
+│ ⑤ 登录成功           │  ← ResetAttempts(username)
+│   生成 JWT → 返回     │  → 200 { token }
+└─────────────────────┘
+```
+
+注意：③ 和 ④ 返回相同的错误信息，攻击者无法区分用户名不存在还是密码错了。
+
+---
+
+## 26.7 安全要点总结
+
+| 要点 | 做法 | 为什么 |
+|------|------|--------|
+| 验证码先校验 | 在查询数据库之前 | 防止浪费数据库资源；不泄露用户信息 |
+| 验证码用完即删 | Verify 第三个参数 = true | 防止重复使用同一个验证码 |
+| 错误信息一致 | "用户名或密码错误"，不区分 | 防止用户名枚举攻击 |
+| 锁定按用户名 | 不是按 IP | 防止共用 IP 误伤；精准锁定目标账号 |
+| 并发安全 | sync.Mutex 保护 map | 多个请求同时登录互不干扰 |
+| 自动解锁 | 15 分钟后 IsLocked 返回 false | 不需要管理员手动解锁 |
+| 成功后清零 | ResetAttempts 删除记录 | 不会因为"之前输错 2 次 + 现在输对" 导致下一次输错 1 次就锁 |
+
+---
+
+## 26.8 前端错误处理注意事项
+
+```
+登录失败时的前端行为：
+  ① 显示后端返回的错误信息
+  ② 自动刷新验证码（fetchCaptcha）
+     → 防止用户用同一个 captcha_id 重复尝试（验证码已被 Verify 删除）
+  ③ 如果是锁定错误 → 显示剩余时间提示
+
+锁定错误的特殊处理：
+  → 可以加一个倒计时显示
+  → 或者直接显示后端返回的消息（已含剩余分钟数）
+```

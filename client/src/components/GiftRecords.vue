@@ -27,7 +27,7 @@
   <el-dialog v-model="editDialogVisible" title="编辑记录" width="450px">
     <el-form :model="editForm" label-width="60px">
       <el-form-item label="姓名">
-        <el-input v-model="editForm.person_name" />
+        <span>{{ editForm.person_name }}</span>
       </el-form-item>
       <el-form-item label="金额">
         <el-input v-model.number="editForm.amount" type="number" />
@@ -62,6 +62,7 @@ interface Record {
   amount: number
   address: string
   gift_note:string
+  card_id: number
 
 }
 
@@ -81,6 +82,7 @@ const editForm = ref({
   amount: 0,
   address: '',
   gift_note: '',
+  card_id: 0,
 })
 
 const handleEdit = (row: Record) => {
@@ -90,6 +92,7 @@ const handleEdit = (row: Record) => {
     amount: row.amount,
     address: row.address || '',
     gift_note: row.gift_note || '',
+      card_id: row.card_id || 0,
   }
   editDialogVisible.value = true
 }

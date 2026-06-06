@@ -28,7 +28,18 @@
      <el-dialog v-model="dialogVisible" title="添加记录">
         <el-form :model="form">
           <el-form-item label="姓名">
-            <el-input v-model="form.person_name" />
+            
+
+            <el-autocomplete 
+                v-model="form.person_name"
+                :fetch-suggestions="querySearch"
+                clearable
+                placeholder="请输入姓名"
+                @select="handleSelect"
+            >
+
+            </el-autocomplete>
+           
           </el-form-item>
           <el-form-item label="金额">
             <el-radio-group v-model="selectedAmount">
@@ -77,6 +88,41 @@ const formatDate = (iso: string): string => {
   if (!iso) return ''
   return String(iso.split('T')[0])
 }
+//搜索建议
+interface RetItem{
+  value:string
+  card_id:number
+}
+const rets = ref<RetItem[]>([])
+const querySearch = async (queryString:string,cb:any)=>{
+
+  const results = queryString ? rets.value.filter(createFilter(queryString)) : rets.value
+  cb(results)
+  
+}
+const createFilter = (queryString:string)=>{
+  return (ret:RetItem)=>{
+    if(!ret.value) return false
+    return ret.value.toLowerCase().indexOf(queryString.toLowerCase()) === 0
+  }
+
+}
+const loadAll =async ()=>{
+  try{
+      const res = await axios.get(`/cards`)
+      
+      rets.value = res.data.cards .filter((card: any) => card.person_name).map((card:any)=>({
+        value:card.person_name,
+        card_id:card.card_id,
+      }))
+  }catch{
+    ElMessage.error('获取卡片列表失败')
+  }
+  
+}
+const handleSelect = (item:RetItem)=>{
+  form.value.card_id = item.card_id
+}
 //获取礼薄详情
 const fetchDetail = async () => {
   loading.value = true
@@ -100,7 +146,7 @@ type Record = {
   amount: number
   address: string
   gift_note:string
-  
+  card_id?:number
 }
 const form = ref<Record>({
   gift_book_id:Number(route.params.id),
@@ -108,6 +154,7 @@ const form = ref<Record>({
   amount: 0,
   address: '',
   gift_note: '',
+  card_id: 0,
 })
 const submitRecord = async () => {
   try {
@@ -117,6 +164,7 @@ const submitRecord = async () => {
     ElMessage.success('记录添加成功')
     dialogVisible.value = false
     fetchRecords()
+    loadAll()
     //重置表单
     form.value = {
       gift_book_id:Number(route.params.id),
@@ -124,6 +172,7 @@ const submitRecord = async () => {
       amount: 0,
       address: '',
       gift_note: '',
+      card_id: 0,
     }
     selectedAmount.value = 100
     customAmount.value = null
@@ -141,6 +190,7 @@ const fetchRecords = ()=>{
 
 onMounted(() => {
   fetchDetail()
+  loadAll()
 })
 </script>
 
