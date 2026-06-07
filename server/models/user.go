@@ -12,6 +12,8 @@ type User struct {
 
 // 登录请求结构体
 type LoginRequest struct {
-	Username string `json:"username" binding:"required"`
-	Password string `json:"password" binding:"required"`
+	Username      string `json:"username" binding:"required"`
+	Password      string `json:"password" binding:"required"`
+	CaptchaID     string `json:"captcha_id" binding:"required"`
+	CaptchaAnswer string `json:"captcha_answer" binding:"required"`
 }

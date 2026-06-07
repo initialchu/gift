@@ -3592,3 +3592,66 @@ POST /api/auth/login
   → 可以加一个倒计时显示
   → 或者直接显示后端返回的消息（已含剩余分钟数）
 ```
+
+---
+
+# 27. 前端响应式适配方案
+
+> 问题：电脑上正常显示的页面（600px 卡片、500px 弹窗），在手机上会溢出屏幕。
+
+## 27.1 核心工具：CSS 媒体查询
+
+根据屏幕宽度应用不同 CSS：
+
+```css
+/* 电脑端样式（默认） */
+.login-card {
+  min-width: 600px;
+}
+
+/* 屏幕宽度 ≤ 768px 时覆盖 */
+@media (max-width: 768px) {
+  .login-card {
+    min-width: unset;
+    width: 90%;
+  }
+}
+```
+
+768px 是常用分界线：> 768 算平板/电脑，≤ 768 算手机。
+
+## 27.2 两种策略
+
+| 策略 | 写法 | 适合场景 |
+|------|------|----------|
+| 桌面优先 | 默认写桌面样式，`@media (max-width: 768px)` 覆盖手机 | 本项目采用 |
+| 移动优先 | 默认写手机样式，`@media (min-width: 768px)` 覆盖桌面 | 新项目更推荐 |
+
+## 27.3 各页面待改造清单
+
+| 页面 | 问题 | 改法 |
+|------|------|------|
+| Login.vue | `.login-card` 写死 `min-width: 600px`，手机超出 | 加 `@media (max-width: 768px)` → `min-width: unset; width: 90%` |
+| Books.vue | 弹窗 `width="500px"` 手机超宽 | 改为 `width="90%"` 或加媒体查询 |
+| GiftRecords.vue | 弹窗 `width="450px"` 手机超宽 | 同上 |
+| GiftBookDetail.vue | 弹窗无 width 属性，问题不大 | 不用改 |
+| Card.vue 表格 | 多列表格窄屏溢出 | `el-table` 天然支持横向滚动，可接受 |
+| DefaultLayout.vue | 横向导航栏不折叠 | 后续可改汉堡菜单，先不急 |
+
+## 27.4 响应式已经 OK 的部分
+
+- `index.html` 有 `<meta name="viewport">` ✅
+- 卡片网格 `grid-template-columns: repeat(auto-fill, minmax(300px, 1fr))` 自动缩列 ✅
+- Element Plus 组件本身有响应式基础 ✅
+
+## 27.5 验证码前端联调要点
+
+```
+① 页面 onMounted → GET /api/auth/captcha
+② 后端返回 { id: "xxx", captcha_img: "data:image/png;base64,..." }
+   → 注意字段名是 captcha_img（不是 captcha_image）
+③ <img :src="captchaImg"> 直接绑定，已带 Data URL 前缀
+④ 点击图片重新获取验证码（刷新）
+⑤ 登录时 POST /api/auth/login 带上四个字段：
+   username / password / captcha_id / captcha_answer
+```

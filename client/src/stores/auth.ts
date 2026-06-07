@@ -27,9 +27,9 @@ export const useAuthStore = defineStore('auth', () => {
   // ========== Actions ==========
 
   // 登录 —— 返回 true 成功 / false 失败
-  async function login(username: string, password: string): Promise<boolean> {
+  async function login(username: string, password: string, captchaid: string, captcha: string): Promise<boolean> {
     //  调登录 API，拿到 token
-     const res = await axios.post('/auth/login', { username, password })
+     const res = await axios.post('/auth/login', { username, password, captcha_id: captchaid, captcha_answer: captcha })
      token.value = res.data.token
      localStorage.setItem('token', res.data.token)
      const payload = decodeToken(res.data.token)

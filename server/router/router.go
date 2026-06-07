@@ -12,7 +12,7 @@ func SetupRouter() *gin.Engine {
 	auth := r.Group("/api/auth")
 	{
 		auth.POST("/login", controllers.Login)
-
+		auth.GET("/captcha", controllers.GetCaptcha)
 	}
 	api := r.Group("/api")
 	api.Use(middlewares.AuthMiddleware())
