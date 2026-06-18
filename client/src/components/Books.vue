@@ -16,7 +16,7 @@
 
             <div class="card-header">
                 <el-dropdown @click.stop>
-                    <img  class="option" src="@/assets/threedot.svg" alt="" />
+                    <img @click.stop class="option" src="@/assets/threedot.svg" alt="" />
                     <template #dropdown >
                         <el-dropdown-menu>
                             <el-dropdown-item @click="openEditDialog(book)">编辑</el-dropdown-item>
@@ -48,7 +48,7 @@
 </div>
 
     <!-- 编辑礼薄弹窗 -->
-    <el-dialog v-model="editDialogVisible" title="编辑礼薄" width="500px">
+    <el-dialog class="edit-dialog" v-model="editDialogVisible" title="编辑礼薄">
       <el-form :model="editForm" label-width="80px">
         <el-form-item label="事件名称">
           <el-input v-model="editForm.event_name" placeholder="请输入礼薄事件" />
@@ -78,7 +78,7 @@ import axios from '../axios'
 
 const router = useRouter()
 const loading = ref(false)
-
+const props = defineProps<{direction?:string}>()
 interface GiftBook {
   ID: number
   CreatedAt: string
@@ -94,7 +94,8 @@ const giftbooks = ref<GiftBook[]>([])
 const fetchGiftBooks = async ()=>{
     loading.value= true
     try{
-        const res = await axios.get('/giftbooks')
+      const url = props.direction ? `/giftbooks?direction=${props.direction}`:'/giftbooks'
+        const res = await axios.get(url)
         console.log(res.data)
         giftbooks.value =res.data.giftbooks
     }catch(err:any){
@@ -146,7 +147,14 @@ const submitEdit = async () => {
 
 // 点击卡片跳转详情页
 const goDetail = (id: number) => {
-  router.push(`/giftbooks/${id}`)
+  if(props.direction){
+    if(props.direction ==='来')
+    router.push(`/giftbooks/${id}`)
+    else{
+    router.push(`/account/${id}`)
+  }
+  }
+ 
 }
 
 // 组件加载时获取礼薄列表
@@ -176,6 +184,7 @@ const confirmDelete = async (id: number) => {
 const deletebook = async(id:number)=>{
     try{
         await axios.post(`/admin/giftbook/${id}`)
+
         ElMessage.success('删除成功')
         // 删除成功后重新获取礼薄列表
         fetchGiftBooks()
@@ -235,5 +244,15 @@ const deletebook = async(id:number)=>{
     height:25px;
     width:25px;
     
+}
+.edit-dialog{
+    width:500px;
+}
+@media (max-width: 768px) {
+  .edit-dialog {
+   min-width:unset;
+   
+    
+  }
 }
 </style>

@@ -47,14 +47,32 @@ func CreateGiftBook(c *gin.Context) {
 // 获取礼薄列表的处理函数
 func GetgiftBooks(c *gin.Context) {
 	var giftbooks []models.GiftBook
-	// 从数据库中查询所有礼薄记录
-	if err := global.DB.Find(&giftbooks).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
+	//筛选direction参数
+	direction := c.Query("direction")
+	//如果direction参数不为空，则根据direction筛选礼薄记录，否则返回所有记录
+	if direction != "" {
+		if direction != "来" && direction != "去" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "direction参数必须是'来'或'去'"})
+			return
+		}
+		// 从数据库中查询所有符合direction条件的礼薄记录
+		if err := global.DB.Where("direction=?", direction).Find(&giftbooks).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+
+	} else {
+		// 从数据库中查询所有礼薄记录
+		if err := global.DB.Find(&giftbooks).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
 	}
+	// 将查询到的礼薄记录作为JSON响应返回给客户端
 	c.JSON(http.StatusOK, gin.H{
 		"giftbooks": giftbooks,
 	})
+
 }
 
 // 获取单个礼薄详情的处理函数

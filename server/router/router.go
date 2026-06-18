@@ -19,6 +19,7 @@ func SetupRouter() *gin.Engine {
 	{
 		// 获取礼薄列表接口
 		api.GET("/giftbooks", controllers.GetgiftBooks)
+
 		// 获取单个礼薄详情接口
 		api.GET("/giftbook/:id", controllers.GetgiftBookbyID)
 		//获取指定礼薄的礼金记录列表接口

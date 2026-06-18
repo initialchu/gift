@@ -3,19 +3,21 @@ package controllers
 import (
 	"giftmemo/global"
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
 )
 
 // CardSummary 人情卡片汇总（每人一张卡）
 type CardSummary struct {
-	CardID          uint    `json:"card_id"`
-	PersonName      string  `json:"person_name"`
-	ReceivedCount   int64   `json:"received_count"`
-	ReceivedAmount  float64 `json:"received_amount"`
-	GivenCount      int64   `json:"given_count"`
-	GivenAmount     float64 `json:"given_amount"`
-	NetAmount       float64 `json:"net_amount"`
+	CardID         uint       `json:"card_id"`
+	PersonName     string     `json:"person_name"`
+	ReceivedCount  int64      `json:"received_count"`
+	ReceivedAmount float64    `json:"received_amount"`
+	GivenCount     int64      `json:"given_count"`
+	GivenAmount    float64    `json:"given_amount"`
+	NetAmount      float64    `json:"net_amount"`
+	GoneAt         *time.Time `json:"gone_at,omitempty"`
 }
 
 // CardDetail 某人的往来明细（含礼薄信息，供前端跳转）
@@ -38,6 +40,7 @@ func GetCards(c *gin.Context) {
 		SELECT
 			c.id   AS card_id,
 			c.person_name,
+			c.gone_at,
 			COUNT(CASE WHEN gb.direction = '来' THEN 1 END)       AS received_count,
 			COALESCE(SUM(CASE WHEN gb.direction = '来' THEN gr.amount ELSE 0 END), 0) AS received_amount,
 			COUNT(CASE WHEN gb.direction = '去' THEN 1 END)       AS given_count,
@@ -48,6 +51,7 @@ func GetCards(c *gin.Context) {
 		JOIN cards AS c ON gr.card_id = c.id
 		GROUP BY c.id, c.person_name
 		ORDER BY c.person_name
+
 	`).Scan(&cards).Error
 
 	if err != nil {

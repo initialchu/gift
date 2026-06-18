@@ -1,15 +1,15 @@
 <template>
-  <div class="giftbooks">
+  <div class="accountbooks">
     <el-header class="gift-header">
       
-      <el-button type="primary" @click="dialogVisible=true">新建礼薄</el-button>
+      <el-button type="primary" @click="dialogVisible=true">新建账本</el-button>
     </el-header>
 
-    <el-dialog v-model="dialogVisible" title="新建礼薄" width="50%">
+    <el-dialog v-model="dialogVisible" title="新建账本" width="50%">
       <el-form :model="form">
-        <el-form-item class="label" label="礼薄事件">
+        <el-form-item class="label" label="账本事件">
 
-          <el-input v-model="form.event_name" placeholder="请输入礼薄事件描述"></el-input>
+          <el-input v-model="form.event_name" placeholder="请输入账本事件描述"></el-input>
           </el-form-item>
         
           <el-form-item label="日期">
@@ -20,7 +20,7 @@
       </el-dialog>
      <!-- 卡片网格 -->
     <div class="books">
-    <Books ref="booksRef" direction="来"/>
+    <Books ref="booksRef" direction="去"/>
       </div>
   </div>
 </template>
@@ -35,12 +35,12 @@ const dialogVisible = ref(false)
 const form = ref({
  event_name: '',
  event_date:'',
-  direction:'来',
+  direction:'去',
 })
 // 子组件 Books 的 ref，用于创建成功后刷新列表
 const booksRef = ref<InstanceType<typeof Books>>()
 
-// 这里是新增礼薄的函数
+// 这里是新增账本的函数
 const createGiftBook = async () => {
   try {
     await axios.post('/admin/giftbook', form.value)

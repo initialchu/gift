@@ -12,6 +12,7 @@
           <el-menu-item index="home">首页</el-menu-item>
           <el-menu-item index="card">人情卡片</el-menu-item>
           <el-menu-item index="giftbooks">礼薄</el-menu-item>
+          <el-menu-item index="account">账本</el-menu-item>
           
         </el-menu>
         <div class="avatar">

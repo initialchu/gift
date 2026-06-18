@@ -4,6 +4,7 @@
     <el-table-column label="礼金" prop="amount" />
     <el-table-column label="地址" prop="address" />
     <el-table-column label="备注" prop="gift_note" />
+    <el-table-column label="时间" prop="gone_at" v-if="direction === '去'" />
     <el-table-column align="right">
       <template #header>
         <el-input v-model="search" size="small" placeholder="Type to search" />
@@ -24,7 +25,7 @@
   </el-table>
 
   <!-- 编辑记录弹窗 -->
-  <el-dialog v-model="editDialogVisible" title="编辑记录" width="450px">
+  <el-dialog class="edit-dialog" v-model="editDialogVisible" title="编辑记录" >
     <el-form :model="editForm" label-width="60px">
       <el-form-item label="姓名">
         <span>{{ editForm.person_name }}</span>
@@ -55,6 +56,7 @@ import {onMounted} from 'vue'
 import {useRoute} from 'vue-router'
 import { ElMessageBox } from 'element-plus'
 const route = useRoute()
+defineProps<{direction:string}>()
 interface Record {
   ID:number
   gift_book_id : number
@@ -63,6 +65,7 @@ interface Record {
   address: string
   gift_note:string
   card_id: number
+  gone_at: string
 
 }
 
@@ -83,6 +86,7 @@ const editForm = ref({
   address: '',
   gift_note: '',
   card_id: 0,
+  gone_at: '',
 })
 
 const handleEdit = (row: Record) => {
@@ -93,6 +97,7 @@ const handleEdit = (row: Record) => {
     address: row.address || '',
     gift_note: row.gift_note || '',
       card_id: row.card_id || 0,
+      gone_at: row.gone_at || '',
   }
   editDialogVisible.value = true
 }
@@ -145,6 +150,11 @@ const fetchRecords = async ()=>{
     const res = await axios.get(`/giftrecord/${route.params.id}/records`)
     
     tableData.value = res.data.gift_records
+    tableData.value.forEach(record=>{
+      if(record.gone_at){
+        record.gone_at = record.gone_at.split('T')[0]||''
+      }
+    })
   }catch(err:any){
     const msg = err.response?.data?.error||'获取记录失败'
     ElMessage.error(msg)
@@ -160,3 +170,15 @@ onMounted(()=>{
 })
 
 </script>
+<style scoped>
+
+.edit-dialog{
+    width:450px;
+}
+@media (max-width: 768px) {
+  .edit-dialog {
+   min-width:unset;
+   
+  }
+}
+</style>

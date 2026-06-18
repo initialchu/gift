@@ -33,6 +33,9 @@ func initDB() {
 	global.DB = db
 	// 自动迁移数据库表结构
 	Autotable()
+	// 迁移卡片数据
+	global.DB.AutoMigrate(&models.Card{})
+	global.DB.AutoMigrate(&models.GiftRecord{})
 }
 
 // 暴露一个函数创建管理员

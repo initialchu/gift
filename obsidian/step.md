@@ -3655,3 +3655,148 @@ POST /api/auth/login
 ⑤ 登录时 POST /api/auth/login 带上四个字段：
    username / password / captcha_id / captcha_answer
 ```
+
+---
+
+# 28. 账本功能 — 2026-06-18
+
+## 28.1 动机
+
+礼薄原本混用"来/去"两个方向，但礼薄本质是"收礼事件"，把"送礼"也放进去语义不对。因此：
+
+- **礼薄** → 只记"来"（收礼）
+- **账本** → 只记"去"（送礼），复用礼薄的数据结构和组件
+- **人情卡片** → 新增"最近去时"（gone_at）追踪
+
+## 28.2 设计思路：复用而非新建表
+
+同一套 `gift_books` + `gift_records` 表结构，通过 `direction` 字段隔离，前端拆分为两个独立概念。改动最小，不破坏现有数据。
+
+## 28.3 后端改动
+
+### 模型层
+
+**Card 模型** (`server/models/card.go`)：
+```go
+GoneAt *time.Time `json:"gone_at,omitempty"`  // 指针类型，NULL = 从未去过
+```
+
+**GiftRecord 模型** (`server/models/gift.go`)：
+```go
+GoneAt *time.Time `json:"gone_at,omitempty"`  // 每条记录的"去"时间
+```
+
+### 控制器
+
+**礼薄列表过滤** (`server/controllers/giftbook.go`)：
+- `GetgiftBooks` 支持 `?direction=来` / `?direction=去` 查询参数
+- 参数校验：非"来/去"返回 400
+- 不传参数返回全部（兼容旧行为）
+
+**创建记录时更新卡片 gone_at** (`server/controllers/giftrecord.go`)：
+- `AddGift`：当关联礼薄 direction="去"时，用请求中的 `gone_at` 更新卡片
+- `UpdateGift`：编辑时同步更新 `gone_at`
+
+**卡片汇总加 gone_at** (`server/controllers/card.go`)：
+- `CardSummary` 结构体新增 `GoneAt *time.Time`
+- SQL 查询 SELECT 中加入 `c.gone_at`
+
+### 路由
+
+不变，`/api/giftbooks` 通过 query 参数区分，不需要额外路由。
+
+### 迁移
+
+`server/config/db.go`：
+```go
+global.DB.AutoMigrate(&models.Card{}, &models.GiftRecord{})
+```
+
+## 28.4 前端改动
+
+### 通用组件修改
+
+**Books.vue** — 接收 `direction` prop：
+```ts
+const props = defineProps<{ direction?: string }>()
+```
+请求时拼接到 URL：`/giftbooks?direction=${props.direction}`
+
+**GiftRecords.vue** — 新增"时间"列 + direction prop：
+```html
+<el-table-column label="时间" prop="gone_at" v-if="direction === '去'" />
+```
+编辑弹窗支持 `gone_at` 字段
+
+### 礼薄侧改动
+
+**GiftBooks.vue**：
+- 去掉新建弹窗的方向 radio
+- `direction` 固定 `"来"`
+- Books 组件传 `<Books direction="来" />`
+
+### 账本侧（新增文件）
+
+**AccountBooks.vue**（新建）：
+- 对照 GiftBooks.vue，去掉方向选择，固定 `direction: '去'`
+- Books 组件传 `<Books direction="去" />`
+- 文案改为"账本"
+
+**AccountDetail.vue**（新建）：
+- 对照 GiftBookDetail.vue
+- 新增 `<el-date-picker>` 选择"去的时间"
+- form 包含 `gone_at` 字段，提交时传给后端
+
+### 卡片侧改动
+
+**Card.vue**：
+- `CardSummary` 接口新增 `gone_at?: string`
+- Grid 卡片中显示"最近去时"（仅当有值时）
+- `CardDetail` 接口同步加 `gone_at`
+
+### 路由
+
+```ts
+{ path: 'account', name: 'account', component: () => import('../views/AccountBooks.vue') }
+{ path: 'account/:id', name: 'accountdetail', component: () => import('../views/AccountDetail.vue') }
+```
+
+### 导航
+
+**DefaultLayout.vue**：菜单新增"账本"入口
+
+## 28.5 数据流示意
+
+```
+用户操作                        数据库
+────────                      ──────
+创建账本 → POST /admin/giftbook    → gift_books (direction=去)
+          { event_name, event_date, direction: '去' }
+
+添加记录 → POST /admin/giftrecord/:id/records
+          { person_name, amount, gone_at, ... }
+                                     → gift_records (含 gone_at)
+                                     → cards.gone_at 被更新
+
+卡片视图 ← GET /api/cards           ← cards (含 gone_at 汇总)
+账本列表 ← GET /api/giftbooks?direction=去  ← gift_books (direction=去)
+```
+
+## 28.6 改动文件清单
+
+| 文件 | 类型 |
+|------|------|
+| `server/models/card.go` | 改 |
+| `server/models/gift.go` | 改 |
+| `server/config/db.go` | 改 |
+| `server/controllers/giftbook.go` | 改 |
+| `server/controllers/giftrecord.go` | 改 |
+| `server/controllers/card.go` | 改 |
+| `client/src/components/Books.vue` | 改 |
+| `client/src/components/GiftRecords.vue` | 改 |
+| `client/src/views/GiftBooks.vue` | 改 |
+| `client/src/views/Card.vue` | 改 |
+| `client/src/views/AccountBooks.vue` | **新** |
+| `client/src/views/AccountDetail.vue` | **新** |
+| `client/src/router/index.ts` | 改 |
+| `client/src/views/DefaultLayout.vue` | 改 |

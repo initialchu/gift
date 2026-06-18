@@ -16,9 +16,13 @@
             </template>
              <div class="card-content">
                   <span class="data">来：{{ card.received_count }} 次</span>
-                
+
                  <span class="data">共计：{{ card.received_amount }} 元 </span>
                  <span class="data">去：{{ card.given_count }} 次</span>
+
+                 <span v-if="card.gone_at" class="data">
+                    最近去时：{{ card.gone_at.split('T')[0] }}
+                  </span>
                  <span class="data">共计：{{ card.given_amount }} 元 </span>
                  
                  <span :class="card.net_amount >= 0 ? 'positive' : 'negative'">
@@ -47,6 +51,7 @@
             <el-table-column label="礼金" prop="amount" />
             <el-table-column label="地址" prop="address" />
             <el-table-column label="备注" prop="gift_note" />
+            
             <el-table-column align="right">
       <template #header>
         <el-input v-model="search" size="small" placeholder="Type to search" />
@@ -109,6 +114,7 @@ interface CardSumary {
   given_count:number
   given_amount:number
   net_amount:number
+  gone_at?:string
 }
 // 获取卡片数据
 const cards = ref<CardSumary[]>([])
@@ -136,6 +142,7 @@ interface CardDetail {
   event_name: string
   event_date: string
   direction: string
+   gone_at?: string
 }
 
 const cardDetails = ref<CardDetail[]>([])

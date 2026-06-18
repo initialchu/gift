@@ -39,6 +39,18 @@ const routes = [
         component: () => import('../views/GiftBookDetail.vue'),
         meta: { requiresAuth: true, hidden: true },
       },
+      {
+        path: 'account',
+        name: 'account',
+        component: () => import('../views/AccountBooks.vue'),
+        meta: { requiresAuth: true },
+      },
+      {
+        path: 'account/:id',
+        name:'accountdetail',
+        component: () => import('../views/AccountDetail.vue'),
+        meta: { requiresAuth: true, hidden: true },
+      }
     ],
   },
 ]

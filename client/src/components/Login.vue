@@ -115,9 +115,11 @@ onMounted(()=>{
     align-items:center;
     position:relative;
     
+    
 }
 .login-card{
-    max-width:400px;
+    min-width:600px;
+    max-width:800px;
     width:90%;
     height:60%;
 }
@@ -151,5 +153,26 @@ onMounted(()=>{
     margin-left:1rem;
     cursor:pointer;
     box-sizing: border-box;
+}
+@media (max-width: 768px) {
+  .login-card {
+    min-width: unset;
+    padding: 0rem;
+   
+  }
+  .captcha {
+    flex-direction: column;
+    align-items: center;
+    
+  }
+  .captcha-image {
+    
+    margin-left: 0;
+    margin-bottom: 1rem;
+  }
+  .login-title{
+    font-size:2rem;
+    margin-bottom:3rem;
+}
 }
 </style>

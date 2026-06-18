@@ -59,6 +59,11 @@ func AddGift(c *gin.Context) {
 		})
 		return
 	}
+	// 在创建记录后，检查关联礼薄的方向
+	if giftbook.Direction == "去" {
+		global.DB.Model(&models.Card{}).Where("id = ?", giftRecord.CardID).
+			Update("gone_at", giftRecord.GoneAt)
+	}
 	c.JSON(http.StatusOK, gin.H{
 		"message":     "礼金记录添加成功",
 		"gift_record": giftRecord,
@@ -159,6 +164,7 @@ func UpdateGift(c *gin.Context) {
 		"address":     giftRecord.Address,
 		"gift_note":   giftRecord.GiftNote,
 		"card_id":     giftRecord.CardID,
+		"gone_at":     giftRecord.GoneAt,
 	}
 	if err := global.DB.Model(&models.GiftRecord{}).Where("id = ?", giftID).Updates(update).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
